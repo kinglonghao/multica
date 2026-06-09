@@ -2,7 +2,7 @@ import { appNavigation } from '../data/navigation';
 import { globalEvents } from '../data/auth';
 import { workspaceStore } from '../data/workspace';
 import { wsClient } from '../realtime/ws-client';
-import { THEME, ColorScheme, SPACE } from '../lib/theme';
+import { THEME, ColorScheme, SPACE, textColor, TextColorKey } from '../lib/theme';
 import { MulticaText } from '../components/ui/Text';
 import { Skeleton } from '../components/ui/Skeleton';
 import { InboxPage } from './InboxPage';
@@ -10,9 +10,8 @@ import { MyIssuesPage } from './MyIssuesPage';
 import { ChatPage } from './ChatPage';
 import { MorePage } from './MorePage';
 
-@Entry
 @ComponentV2
-struct WorkspaceLayout {
+export struct WorkspaceLayout {
   @Local activeTab: number = 0;
   @Local scheme: ColorScheme = 'light';
   @Local bootstrapping: boolean = true;
@@ -65,43 +64,39 @@ struct WorkspaceLayout {
   }
 
   build() {
-    Navigation(appNavigation.stack) {
-      if (this.bootstrapping) {
-        Stack({ alignContent: Alignment.Center }) {
-          Column() {
-            Skeleton({ scheme: this.scheme, width: 200, height: 24, radius: 6 })
-            Skeleton({ scheme: this.scheme, width: 120, height: 16, radius: 4 })
-              .margin({ top: SPACE['2'] })
-          }
-        }
-        .width('100%')
-        .height('100%')
-        .backgroundColor(String(THEME[this.scheme].background))
-      } else {
+    if (this.bootstrapping) {
+      Stack({ alignContent: Alignment.Center }) {
         Column() {
-          Stack() {
-            if (this.activeTab === 0) {
-              InboxPage();
-            } else if (this.activeTab === 1) {
-              MyIssuesPage();
-            } else if (this.activeTab === 2) {
-              ChatPage();
-            } else {
-              MorePage();
-            }
-          }
-          .layoutWeight(1)
-          .width('100%')
-
-          this.TabBar()
+          Skeleton({ scheme: this.scheme, width: 200, height: 24, radius: 6 })
+          Skeleton({ scheme: this.scheme, width: 120, height: 16, radius: 4 })
+            .margin({ top: SPACE['2'] })
         }
-        .width('100%')
-        .height('100%')
-        .backgroundColor(String(THEME[this.scheme].background))
       }
+      .width('100%')
+      .height('100%')
+      .backgroundColor(String(THEME[this.scheme].background))
+    } else {
+      Column() {
+        Stack() {
+          if (this.activeTab === 0) {
+            InboxPage();
+          } else if (this.activeTab === 1) {
+            MyIssuesPage();
+          } else if (this.activeTab === 2) {
+            ChatPage();
+          } else {
+            MorePage();
+          }
+        }
+        .layoutWeight(1)
+        .width('100%')
+
+        this.TabBar()
+      }
+      .width('100%')
+      .height('100%')
+      .backgroundColor(String(THEME[this.scheme].background))
     }
-    .mode(NavigationMode.Stack)
-    .hideTitleBar(true)
   }
 
   @Builder TabBar() {
@@ -124,12 +119,12 @@ struct WorkspaceLayout {
     Column() {
       SymbolGlyph(glyph)
         .fontSize(20)
-        .fontColor([String(THEME[this.scheme][this.activeTab === index ? 'foreground' : 'mutedForeground'])])
+        .fontColor([textColor(this.scheme, this.tabColorKey(index))])
       MulticaText({
-        value: label as unknown as string,
+        value: this.resolveLabel(label),
         scheme: this.scheme,
         size: 'xs',
-        color: this.activeTab === index ? 'foreground' : 'mutedForeground'
+        color: this.tabColorKey(index)
       })
         .margin({ top: 2 })
     }
@@ -138,5 +133,27 @@ struct WorkspaceLayout {
     .justifyContent(FlexAlign.Center)
     .alignItems(HorizontalAlign.Center)
     .onClick(() => { this.activeTab = index; })
+  }
+
+  /**
+   * Compute the TextColorKey for the tab at `index` based on whether
+   * it's the active tab. Returning the typed `TextColorKey` lets
+   * `textColor()` pick the value statically — no dynamic bracket
+   * access.
+   */
+  private tabColorKey(index: number): TextColorKey {
+    return this.activeTab === index ? 'foreground' : 'mutedForeground';
+  }
+
+  /**
+   * Resolve a `Resource` to its string form via the resource manager.
+   * Replaces the v0.2 `as unknown as string` double cast (C-5).
+   */
+  private resolveLabel(r: Resource): string {
+    try {
+      return getContext(this).resourceManager.getStringSync(r);
+    } catch {
+      return '';
+    }
   }
 }

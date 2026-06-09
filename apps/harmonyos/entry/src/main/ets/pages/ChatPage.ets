@@ -1,5 +1,6 @@
 import { appNavigation } from '../data/navigation';
 import { api } from '../data/api';
+import { workspaceStore } from '../data/workspace';
 import { useQuery, QueryHandle } from '../queries/cache';
 import { ChatSession } from '../models/types';
 import { THEME, ColorScheme, SPACE } from '../lib/theme';
@@ -17,8 +18,9 @@ export struct ChatPage {
 
   aboutToAppear(): void {
     this.scheme = this.detectScheme();
+    const wsId = workspaceStore.currentId;
     this.query = useQuery<ChatSession[]>(
-      ['chat-sessions'],
+      ['chat-sessions', wsId],
       ({ signal }) => api.listChatSessions({ signal }),
       { staleTimeMs: 30_000, onUpdate: () => { this.version++; } }
     );
@@ -116,7 +118,9 @@ export struct ChatPage {
                 }
                 .padding(SPACE['4'])
                 .onClick(() => {
-                  appNavigation.pushName('IssueDetailPage', { id: session.id });
+                  // H-1: chat sessions open the chat detail page,
+                  // not the issue detail page.
+                  appNavigation.pushName('ChatDetailPage', { id: session.id });
                 })
               }
               .divider({ strokeWidth: 1, color: String(THEME[this.scheme].border) })

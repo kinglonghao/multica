@@ -24,7 +24,7 @@ export struct ProjectRow {
       .width(36)
       .height(36)
       .borderRadius(RADIUS.md)
-      .backgroundColor('#5046E4')
+      .backgroundColor(String(THEME[this.scheme].brand))
       .margin({ right: SPACE['3'] })
 
       Column() {

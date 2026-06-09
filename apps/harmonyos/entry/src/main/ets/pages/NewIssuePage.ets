@@ -10,9 +10,8 @@ import { MulticaButton } from '../components/ui/Button';
 import { StatusIcon } from '../components/ui/StatusIcon';
 import { PriorityIcon } from '../components/ui/PriorityIcon';
 
-@Entry
 @ComponentV2
-struct NewIssuePage {
+export struct NewIssuePage {
   @Local scheme: ColorScheme = 'light';
   @Local title: string = '';
   @Local description: string = '';
@@ -53,86 +52,82 @@ struct NewIssuePage {
   }
 
   build() {
-    Navigation(appNavigation.stack) {
-      Column() {
-        Header({
-          title: 'New issue',
-          scheme: this.scheme,
-          left: this.CancelButton(),
-          right: this.SubmitButton()
-        })
+    Column() {
+      Header({
+        title: 'New issue',
+        scheme: this.scheme,
+        left: this.CancelButton(),
+        right: this.SubmitButton()
+      })
 
-        Scroll() {
-          Column() {
+      Scroll() {
+        Column() {
+          MulticaText({
+            value: 'Title',
+            scheme: this.scheme,
+            size: 'sm',
+            weight: 'medium',
+            color: 'foreground'
+          })
+            .margin({ top: SPACE['4'] })
+
+          TextInput({ placeholder: 'What needs to be done?', text: this.title })
+            .placeholderColor(String(THEME[this.scheme].mutedForeground))
+            .fontColor(String(THEME[this.scheme].foreground))
+            .backgroundColor(String(THEME[this.scheme].card))
+            .borderRadius(RADIUS.md)
+            .padding(SPACE['3'])
+            .width('100%')
+            .margin({ top: SPACE['2'] })
+            .onChange((value: string) => {
+              this.title = value;
+              this.errorMessage = '';
+            })
+
+          MulticaText({
+            value: 'Description',
+            scheme: this.scheme,
+            size: 'sm',
+            weight: 'medium',
+            color: 'foreground'
+          })
+            .margin({ top: SPACE['4'] })
+
+          TextArea({ placeholder: 'Add more context (optional)', text: this.description })
+            .placeholderColor(String(THEME[this.scheme].mutedForeground))
+            .fontColor(String(THEME[this.scheme].foreground))
+            .backgroundColor(String(THEME[this.scheme].card))
+            .borderRadius(RADIUS.md)
+            .padding(SPACE['3'])
+            .width('100%')
+            .height(120)
+            .margin({ top: SPACE['2'] })
+            .onChange((value: string) => {
+              this.description = value;
+            })
+
+          this.PickerRow('Status', statusLabel(this.status))
+          this.PickerRow('Priority', priorityLabel(this.priority))
+
+          if (this.errorMessage) {
             MulticaText({
-              value: 'Title',
+              value: this.errorMessage,
               scheme: this.scheme,
               size: 'sm',
-              weight: 'medium',
-              color: 'foreground'
+              color: 'destructive'
             })
-              .margin({ top: SPACE['4'] })
-
-            TextInput({ placeholder: 'What needs to be done?', text: this.title })
-              .placeholderColor(String(THEME[this.scheme].mutedForeground))
-              .fontColor(String(THEME[this.scheme].foreground))
-              .backgroundColor(String(THEME[this.scheme].card))
-              .borderRadius(RADIUS.md)
-              .padding(SPACE['3'])
-              .width('100%')
               .margin({ top: SPACE['2'] })
-              .onChange((value: string) => {
-                this.title = value;
-                this.errorMessage = '';
-              })
-
-            MulticaText({
-              value: 'Description',
-              scheme: this.scheme,
-              size: 'sm',
-              weight: 'medium',
-              color: 'foreground'
-            })
-              .margin({ top: SPACE['4'] })
-
-            TextArea({ placeholder: 'Add more context (optional)', text: this.description })
-              .placeholderColor(String(THEME[this.scheme].mutedForeground))
-              .fontColor(String(THEME[this.scheme].foreground))
-              .backgroundColor(String(THEME[this.scheme].card))
-              .borderRadius(RADIUS.md)
-              .padding(SPACE['3'])
-              .width('100%')
-              .height(120)
-              .margin({ top: SPACE['2'] })
-              .onChange((value: string) => {
-                this.description = value;
-              })
-
-            this.PickerRow('Status', statusLabel(this.status))
-            this.PickerRow('Priority', priorityLabel(this.priority))
-
-            if (this.errorMessage) {
-              MulticaText({
-                value: this.errorMessage,
-                scheme: this.scheme,
-                size: 'sm',
-                color: 'destructive'
-              })
-                .margin({ top: SPACE['2'] })
-            }
           }
-          .padding(SPACE['4'])
-          .alignItems(HorizontalAlign.Start)
         }
-        .layoutWeight(1)
-        .width('100%')
+        .padding(SPACE['4'])
+        .alignItems(HorizontalAlign.Start)
       }
+      .layoutWeight(1)
       .width('100%')
-      .height('100%')
-      .backgroundColor(String(THEME[this.scheme].background))
     }
-    .mode(NavigationMode.Stack)
-    .hideTitleBar(true)
+    .width('100%')
+    .height('100%')
+    .backgroundColor(String(THEME[this.scheme].background))
   }
 
   @Builder PickerRow(label: string, value: string) {

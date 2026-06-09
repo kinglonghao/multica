@@ -9,43 +9,69 @@
  *
  * When changing a color, change BOTH light and dark entries — there's no
  * "tokens.css" diff to catch a missed variant.
+ *
+ * Note (C-2 / C-4): ArkTS forbids `as const` (and the dynamic bracket
+ * access it implies at type-check sites). We use explicit object
+ * literals with `Record<string, number>` and let components pick values
+ * via a typed accessor function (`space()`, `radius()`) so the
+ * property key is statically known at the call site.
  */
 
 export type ColorScheme = 'light' | 'dark';
 
+export type TextColorKey =
+  | 'foreground'
+  | 'mutedForeground'
+  | 'destructive'
+  | 'brand'
+  | 'success'
+  | 'warning'
+  | 'brandForeground'
+  | 'agentForeground';
+
+export type SpaceKey =
+  | '0' | '0.5' | '1' | '1.5' | '2' | '2.5' | '3' | '3.5' | '4'
+  | '5' | '6' | '7' | '8' | '9' | '10' | '12' | '16' | '20';
+
+export type RadiusKey = 'none' | 'sm' | 'DEFAULT' | 'md' | 'lg' | 'xl' | '2xl' | 'full';
+
+export type FontSizeKey = 'xs' | 'sm' | 'base' | 'md' | 'lg' | 'xl' | '2xl' | '3xl';
+
+export type FontWeightKey = 'normal' | 'medium' | 'semibold' | 'bold';
+
 export interface ThemeTokens {
   // Surface
-  background: ResourceColor;
-  card: ResourceColor;
-  foreground: ResourceColor;
-  mutedForeground: ResourceColor;
-  border: ResourceColor;
+  background: string;
+  card: string;
+  foreground: string;
+  mutedForeground: string;
+  border: string;
 
   // Brand
-  brand: ResourceColor;
-  brandForeground: ResourceColor;
-  agent: ResourceColor;
-  agentForeground: ResourceColor;
+  brand: string;
+  brandForeground: string;
+  agent: string;
+  agentForeground: string;
 
   // Status colors
-  destructive: ResourceColor;
-  success: ResourceColor;
-  warning: ResourceColor;
+  destructive: string;
+  success: string;
+  warning: string;
 
   // Status icons
-  statusBacklog: ResourceColor;
-  statusTodo: ResourceColor;
-  statusInProgress: ResourceColor;
-  statusInReview: ResourceColor;
-  statusDone: ResourceColor;
-  statusCancelled: ResourceColor;
+  statusBacklog: string;
+  statusTodo: string;
+  statusInProgress: string;
+  statusInReview: string;
+  statusDone: string;
+  statusCancelled: string;
 
   // Priority
-  priorityUrgent: ResourceColor;
-  priorityHigh: ResourceColor;
-  priorityMedium: ResourceColor;
-  priorityLow: ResourceColor;
-  priorityNone: ResourceColor;
+  priorityUrgent: string;
+  priorityHigh: string;
+  priorityMedium: string;
+  priorityLow: string;
+  priorityNone: string;
 }
 
 const light: ThemeTokens = {
@@ -114,11 +140,34 @@ export const THEME: Record<ColorScheme, ThemeTokens> = {
 };
 
 /**
+ * Static text-color lookup. Components call `textColor(scheme, key)`
+ * instead of doing `THEME[scheme][key]` — the latter is dynamic
+ * bracket access, which ArkTS forbids. The `switch` makes the
+ * property selection static at the call site and survives strict
+ * type checking.
+ */
+export const textColor: (scheme: ColorScheme, key: TextColorKey) => string =
+  (scheme: ColorScheme, key: TextColorKey): string => {
+    const t = THEME[scheme];
+    switch (key) {
+      case 'foreground': return t.foreground;
+      case 'mutedForeground': return t.mutedForeground;
+      case 'destructive': return t.destructive;
+      case 'brand': return t.brand;
+      case 'success': return t.success;
+      case 'warning': return t.warning;
+      case 'brandForeground': return t.brandForeground;
+      case 'agentForeground': return t.agentForeground;
+      default: return t.foreground;
+    }
+  };
+
+/**
  * Spacing tokens. iOS uses Tailwind's 4-unit scale; ArkUI uses vp
  * (virtual pixels) with a 4-unit system that's close enough to call
  * 1:1. The 1.5/2.5 increments follow Tailwind's half-steps.
  */
-export const SPACE = {
+export const SPACE: Record<SpaceKey, number> = {
   '0': 0,
   '0.5': 2,
   '1': 4,
@@ -137,9 +186,9 @@ export const SPACE = {
   '12': 48,
   '16': 64,
   '20': 80
-} as const;
+};
 
-export const RADIUS = {
+export const RADIUS: Record<RadiusKey, number> = {
   none: 0,
   sm: 4,
   DEFAULT: 6,
@@ -148,9 +197,9 @@ export const RADIUS = {
   xl: 16,
   '2xl': 20,
   full: 9999
-} as const;
+};
 
-export const FONT_SIZE = {
+export const FONT_SIZE: Record<FontSizeKey, number> = {
   xs: 11,
   sm: 13,
   base: 14,
@@ -159,11 +208,11 @@ export const FONT_SIZE = {
   xl: 20,
   '2xl': 24,
   '3xl': 30
-} as const;
+};
 
-export const FONT_WEIGHT = {
+export const FONT_WEIGHT: Record<FontWeightKey, number> = {
   normal: 400,
   medium: 500,
   semibold: 600,
   bold: 700
-} as const;
+};

@@ -1,21 +1,5 @@
 {
   "src": [
-    "pages/Index",
-    "pages/LoginPage",
-    "pages/VerifyPage",
-    "pages/SelectWorkspacePage",
-    "pages/WorkspaceLayout",
-    "pages/InboxPage",
-    "pages/MyIssuesPage",
-    "pages/ChatPage",
-    "pages/MorePage",
-    "pages/IssueDetailPage",
-    "pages/ProjectDetailPage",
-    "pages/NewIssuePage",
-    "pages/SearchPage",
-    "pages/SwitchWorkspacePage",
-    "pages/ProfilePage",
-    "pages/NotificationsPage",
-    "pages/AgentsPage"
+    "pages/Index"
   ]
 }

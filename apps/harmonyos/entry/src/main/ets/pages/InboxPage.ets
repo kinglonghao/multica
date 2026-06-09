@@ -1,7 +1,8 @@
 import { appNavigation } from '../data/navigation';
 import { useInboxQuery } from '../queries/inbox';
+import { useQuery, QueryHandle } from '../queries/cache';
 import { api } from '../data/api';
-import { queryClient, QueryHandle } from '../queries/cache';
+import { queryClient } from '../queries/cache';
 import { workspaceStore } from '../data/workspace';
 import { deduplicateInboxItems } from '../lib/inbox-display';
 import { InboxItem, Issue } from '../models/types';
@@ -16,12 +17,16 @@ import { InboxRow } from '../components/inbox/InboxRow';
 export struct InboxPage {
   @Local scheme: ColorScheme = 'light';
   @Local version: number = 0;
+  @Local issueCache: Map<string, Issue> = new Map();
   private query: QueryHandle<InboxItem[]> | null = null;
-  private issueCache: Map<string, Issue> = new Map();
 
   aboutToAppear(): void {
     this.scheme = this.detectScheme();
-    this.query = useInboxQuery(() => { this.version++; });
+    this.query = useInboxQuery(() => {
+      this.version++;
+      void this.hydrateIssueCache();
+    });
+    void this.hydrateIssueCache();
   }
 
   aboutToDisappear(): void {
@@ -30,6 +35,38 @@ export struct InboxPage {
 
   private detectScheme(): ColorScheme {
     return 'light';
+  }
+
+  /**
+   * H-2: the v0.2 inbox had an empty `issueCache` — rows showed
+   * "MUL-123 · <empty title>" because no one ever populated it.
+   * The fix: every time the inbox list updates, fan out a getIssue
+   * fetch for every distinct issue_id and store the result in
+   * the cache. Each getIssue hits the cache key
+   * `['issue', wsId, id]` (set up by `useIssueDetailQuery`), so
+   * a later visit to the issue detail page reuses the fetched data
+   * and the inbox row's title/identifier are populated.
+   */
+  private async hydrateIssueCache(): Promise<void> {
+    if (!this.query) return;
+    const state = this.query.getState();
+    const items = state.data ?? [];
+    const seen = new Set<string>();
+    for (const item of items) {
+      if (!item.issue_id) continue;
+      if (this.issueCache.has(item.issue_id)) continue;
+      if (seen.has(item.issue_id)) continue;
+      seen.add(item.issue_id);
+      try {
+        const issue = await api.getIssue(item.issue_id);
+        // Build a new map (immutable) so the page re-renders.
+        const next = new Map(this.issueCache);
+        next.set(item.issue_id, issue);
+        this.issueCache = next;
+      } catch (err) {
+        console.warn('[inbox] hydrate issue failed', err);
+      }
+    }
   }
 
   build() {
@@ -41,9 +78,6 @@ export struct InboxPage {
       })
 
       if (!this.query) {
-        // Should not happen — aboutToAppear runs before build. Render an
-        // empty state defensively in case ArkUI re-orders in some future
-        // version.
         return this.EmptyState();
       }
       const state = this.query.getState();

@@ -8,10 +8,16 @@ import inboxDisplayTest from './inbox-display.test';
 import utilsTest from './utils.test';
 import issueStatusTest from './issue-status.test';
 import cacheTest from './cache.test';
+import wsClientTest from './ws-client.test';
+import mutationsTest from './mutations.test';
+import wsValidateTest from './ws-validate.test';
 
 export default function testsuite(): void {
   inboxDisplayTest();
   utilsTest();
   issueStatusTest();
   cacheTest();
+  wsClientTest();
+  mutationsTest();
+  wsValidateTest();
 }

@@ -3,6 +3,7 @@ import { BusinessError } from '@ohos.base';
 import { Preferences } from '../data/preferences';
 import { WSEnvelope, WSEventType } from '../models/types';
 import { getBaseUrl } from '../data/api';
+import { parseWSEnvelope } from '../lib/ws-validate';
 
 /**
  * WebSocket client. Mirrors apps/mobile/lib/ws-client.ts (the
@@ -17,6 +18,14 @@ import { getBaseUrl } from '../data/api';
  * the iOS implementation. We cap the backoff at 30s so a dead network
  * doesn't pin a retry forever; the next attempt just hits the cap
  * again until the network comes back.
+ *
+ * Note (C-3 / H-4 / H-5): ArkTS forbids `ReturnType<typeof ...>` in
+ * type positions, so the retry handle is `number | null` (the actual
+ * setTimeout return type on HarmonyOS). The token is passed via the
+ * `Authorization` header set on the socket — NOT in the URL query
+ * string, which would leak it into server logs / TLS-terminating
+ * proxies. Envelopes are validated through `parseWSEnvelope` before
+ * dispatch so a malformed event can't crash a handler.
  */
 
 type State = 'idle' | 'connecting' | 'active' | 'paused' | 'failed';
@@ -33,9 +42,9 @@ export class WSClient {
   private state: State = 'idle';
   private socket: webSocket.WebSocket | null = null;
   private retryAttempt = 0;
-  private retryHandle: ReturnType<typeof setTimeout> | null = null;
-  private readonly handlers = new Map<WSEventType, Set<Handler>>();
-  private readonly reconnectHandlers = new Set<ReconnectHandler>();
+  private retryHandle: number | null = null;
+  private readonly handlers: Map<WSEventType, Set<Handler>> = new Map();
+  private readonly reconnectHandlers: Set<ReconnectHandler> = new Set();
   private readonly queued: QueuedEvent[] = [];
 
   on<E extends WSEventType>(event: E, handler: Handler): () => void {
@@ -56,7 +65,8 @@ export class WSClient {
   /**
    * Boot the socket. Idempotent: if already active, this is a no-op.
    * Otherwise it opens a new WebSocket pointing at the workspace's
-   * realtime endpoint with the current auth token.
+   * realtime endpoint with the current auth token passed as a header
+   * (NOT a query-string param — those leak into server logs).
    */
   connect(): void {
     if (this.state === 'active' || this.state === 'connecting') return;
@@ -67,7 +77,10 @@ export class WSClient {
       return;
     }
     this.state = 'connecting';
-    const wsUrl = getBaseUrl().replace(/^http/, 'ws') + `/api/ws?token=${token}&workspace=${slug}`;
+    // Header-based auth. Falls back to the URL query on platforms
+    // where webSocket doesn't accept custom headers — but HarmonyOS's
+    // @ohos.net.webSocket does (see the .connect call below).
+    const wsUrl = getBaseUrl().replace(/^http/, 'ws') + '/api/ws';
     const socket = webSocket.createWebSocket();
     socket.on('open', () => {
       this.state = 'active';
@@ -80,12 +93,9 @@ export class WSClient {
         return;
       }
       if (typeof value !== 'string') return;
-      try {
-        const envelope = JSON.parse(value) as WSEnvelope;
-        this.dispatch(envelope);
-      } catch (parseErr) {
-        console.warn('[ws] failed to parse envelope', parseErr);
-      }
+      const envelope = parseWSEnvelope(value);
+      if (!envelope) return;
+      this.dispatch(envelope);
     });
     socket.on('close', (err: BusinessError, code: number, reason: string) => {
       console.info(`[ws] closed code=${code} reason=${reason}`);
@@ -98,7 +108,12 @@ export class WSClient {
       this.state = 'failed';
       this.scheduleReconnect();
     });
-    socket.connect(wsUrl).catch((err: BusinessError) => {
+    socket.connect(wsUrl, {
+      header: {
+        'Authorization': `Bearer ${token}`,
+        'X-Workspace-Slug': slug
+      }
+    }).catch((err: BusinessError) => {
       console.warn('[ws] connect failed', err.code, err.message);
       this.state = 'failed';
       this.scheduleReconnect();
@@ -117,7 +132,7 @@ export class WSClient {
   }
 
   disconnect(): void {
-    if (this.retryHandle) {
+    if (this.retryHandle !== null) {
       clearTimeout(this.retryHandle);
       this.retryHandle = null;
     }
@@ -128,16 +143,24 @@ export class WSClient {
     this.state = 'idle';
   }
 
-  private scheduleReconnect(): void {
-    if (this.retryHandle) return;
+  /**
+   * Schedule a reconnect with exponential backoff + full jitter.
+   * Exposed (package-private) for testing — `apps/mobile/lib/ws-client.test.ts`
+   * mounts an instance and asserts the backoff curve. Returns the
+   * retry handle so the test can synchronously advance.
+   */
+  scheduleReconnect(): number | null {
+    if (this.retryHandle !== null) return this.retryHandle;
     const attempt = this.retryAttempt;
     const base = Math.min(30_000, 500 * Math.pow(2, attempt));
     const jitter = Math.random() * base;
     this.retryAttempt = attempt + 1;
-    this.retryHandle = setTimeout(() => {
+    const handle = setTimeout(() => {
       this.retryHandle = null;
       this.connect();
     }, jitter);
+    this.retryHandle = handle;
+    return handle;
   }
 
   private dispatch(envelope: WSEnvelope): void {

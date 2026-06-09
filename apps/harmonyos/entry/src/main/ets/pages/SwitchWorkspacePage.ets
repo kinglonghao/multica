@@ -7,9 +7,8 @@ import { Header } from '../components/ui/Header';
 import { IconButton } from '../components/ui/IconButton';
 import { Skeleton } from '../components/ui/Skeleton';
 
-@Entry
 @ComponentV2
-struct SwitchWorkspacePage {
+export struct SwitchWorkspacePage {
   @Local scheme: ColorScheme = 'light';
   @Local workspaces: Workspace[] = [];
   @Local loading: boolean = true;
@@ -39,65 +38,61 @@ struct SwitchWorkspacePage {
   }
 
   build() {
-    Navigation(appNavigation.stack) {
-      Column() {
-        Header({
-          title: 'Switch workspace',
-          scheme: this.scheme,
-          left: this.BackButton()
-        })
+    Column() {
+      Header({
+        title: 'Switch workspace',
+        scheme: this.scheme,
+        left: this.BackButton()
+      })
 
-        if (this.loading) {
-          Column() {
-            ForEach([1, 2, 3], () => {
-              Skeleton({ scheme: this.scheme, width: '90%', height: 56, radius: 8 })
-                .margin({ top: SPACE['3'] })
-            })
-          }
-          .padding(SPACE['4'])
-          .width('100%')
-        } else {
-          List({ space: 0 }) {
-            ForEach(this.workspaces, (ws: Workspace) => {
-              ListItem() {
-                Row() {
+      if (this.loading) {
+        Column() {
+          ForEach([1, 2, 3], () => {
+            Skeleton({ scheme: this.scheme, width: '90%', height: 56, radius: 8 })
+              .margin({ top: SPACE['3'] })
+          })
+        }
+        .padding(SPACE['4'])
+        .width('100%')
+      } else {
+        List({ space: 0 }) {
+          ForEach(this.workspaces, (ws: Workspace) => {
+            ListItem() {
+              Row() {
+                MulticaText({
+                  value: ws.name,
+                  scheme: this.scheme,
+                  size: 'base',
+                  weight: 'medium',
+                  color: 'foreground'
+                })
+                if (ws.id === workspaceStore.currentId) {
+                  Blank()
                   MulticaText({
-                    value: ws.name,
+                    value: '✓',
                     scheme: this.scheme,
                     size: 'base',
                     weight: 'medium',
-                    color: 'foreground'
+                    color: 'brand'
                   })
-                  if (ws.id === workspaceStore.currentId) {
-                    Blank()
-                    MulticaText({
-                      value: '✓',
-                      scheme: this.scheme,
-                      size: 'base',
-                      weight: 'medium',
-                      color: 'brand'
-                    })
-                  }
                 }
-                .width('100%')
-                .padding(SPACE['4'])
-                .backgroundColor(String(THEME[this.scheme].card))
-                .borderRadius(RADIUS.md)
-                .margin({ top: SPACE['2'], left: SPACE['4'], right: SPACE['4'] })
-                .onClick(() => { void this.pick(ws); })
               }
-            })
-          }
-          .layoutWeight(1)
-          .width('100%')
+              .width('100%')
+              .padding(SPACE['4'])
+              .backgroundColor(String(THEME[this.scheme].card))
+              .borderRadius(RADIUS.md)
+              .margin({ top: SPACE['2'], left: SPACE['4'], right: SPACE['4'] })
+              .onClick(() => { void this.pick(ws); })
+            }
+          })
         }
+        .layoutWeight(1)
+        .width('100%')
       }
-      .width('100%')
-      .height('100%')
-      .backgroundColor(String(THEME[this.scheme].background))
     }
-    .mode(NavigationMode.Stack)
-    .hideTitleBar(true)
+    .width('100%')
+    .height('100%')
+    .backgroundColor(String(THEME[this.scheme].background))
   }
 
   @Builder BackButton() {

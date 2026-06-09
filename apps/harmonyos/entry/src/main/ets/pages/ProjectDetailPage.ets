@@ -14,14 +14,23 @@ import { Skeleton } from '../components/ui/Skeleton';
 import { Card } from '../components/ui/Card';
 import { Project, ListIssuesResponse } from '../models/types';
 
-@Entry
 @ComponentV2
-struct ProjectDetailPage {
+export struct ProjectDetailPage {
+  @Param id: string = '';
   @Local scheme: ColorScheme = 'light';
-  @Local projectId: string = '';
+  @Local version: number = 0;
+  private project: QueryHandle<Project> | null = null;
+  private issues: QueryHandle<ListIssuesResponse> | null = null;
 
   aboutToAppear(): void {
     this.scheme = this.detectScheme();
+    this.project = useProjectDetailQuery(this.id, () => { this.version++; });
+    this.issues = useIssueListQuery({ project_id: this.id }, () => { this.version++; });
+  }
+
+  aboutToDisappear(): void {
+    this.project?.unsubscribe();
+    this.issues?.unsubscribe();
   }
 
   private detectScheme(): ColorScheme {
@@ -29,31 +38,27 @@ struct ProjectDetailPage {
   }
 
   build() {
-    Navigation(appNavigation.stack) {
-      Column() {
-        Header({
-          title: 'Project',
+    Column() {
+      Header({
+        title: 'Project',
+        scheme: this.scheme,
+        left: this.BackButton()
+      })
+      if (!this.id) {
+        MulticaText({
+          value: 'No project id provided',
           scheme: this.scheme,
-          left: this.BackButton()
+          size: 'sm',
+          color: 'destructive'
         })
-        if (this.projectId) {
-          this.Body()
-        } else {
-          MulticaText({
-            value: 'No project id provided',
-            scheme: this.scheme,
-            size: 'sm',
-            color: 'destructive'
-          })
-            .padding(SPACE['4'])
-        }
+          .padding(SPACE['4'])
+      } else {
+        this.Body()
       }
-      .width('100%')
-      .height('100%')
-      .backgroundColor(String(THEME[this.scheme].background))
     }
-    .mode(NavigationMode.Stack)
-    .hideTitleBar(true)
+    .width('100%')
+    .height('100%')
+    .backgroundColor(String(THEME[this.scheme].background))
   }
 
   @Builder BackButton() {
@@ -66,29 +71,6 @@ struct ProjectDetailPage {
   }
 
   @Builder Body() {
-    ProjectDetailBody({ projectId: this.projectId, scheme: this.scheme })
-  }
-}
-
-@ComponentV2
-struct ProjectDetailBody {
-  @Param projectId: string = '';
-  @Param scheme: ColorScheme = 'light';
-  @Local version: number = 0;
-  private project: QueryHandle<Project> | null = null;
-  private issues: QueryHandle<ListIssuesResponse> | null = null;
-
-  aboutToAppear(): void {
-    this.project = useProjectDetailQuery(this.projectId, () => { this.version++; });
-    this.issues = useIssueListQuery({ project_id: this.projectId }, () => { this.version++; });
-  }
-
-  aboutToDisappear(): void {
-    this.project?.unsubscribe();
-    this.issues?.unsubscribe();
-  }
-
-  build() {
     if (!this.project || !this.issues) {
       Column() {
         Skeleton({ scheme: this.scheme, width: '90%', height: 28, radius: 6 })
@@ -118,7 +100,7 @@ struct ProjectDetailBody {
           .width(56)
           .height(56)
           .borderRadius(RADIUS.lg)
-          .backgroundColor('#5046E4')
+          .backgroundColor(String(THEME[this.scheme].brand))
 
           MulticaText({
             value: p.name,

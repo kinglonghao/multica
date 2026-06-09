@@ -18,6 +18,7 @@ export struct MorePage {
   @Local userName: string = '';
   @Local userEmail: string = '';
   @Local workspaceName: string = '';
+  @Local logoutError: string = '';
 
   aboutToAppear(): void {
     this.scheme = this.detectScheme();
@@ -36,10 +37,18 @@ export struct MorePage {
   }
 
   private async logout(): Promise<void> {
-    wsClient.disconnect();
-    await workspaceStore.clear();
-    await authStore.logout();
-    appNavigation.replaceName('LoginPage');
+    // M-5: wrap in try/catch so a failed local clear doesn't leave
+    // the user in a half-logged-out state with no UI affordance to
+    // recover. The earlier v0.2 code had no try/catch and could leave
+    // the UI on the More tab with an unusable auth state.
+    try {
+      wsClient.disconnect();
+      await workspaceStore.clear();
+      await authStore.logout();
+      appNavigation.replaceName('LoginPage');
+    } catch (err) {
+      this.logoutError = err instanceof Error ? err.message : 'Sign-out failed — please try again';
+    }
   }
 
   build() {
@@ -97,6 +106,16 @@ export struct MorePage {
       ])
 
       Blank()
+
+      if (this.logoutError) {
+        MulticaText({
+          value: this.logoutError,
+          scheme: this.scheme,
+          size: 'sm',
+          color: 'destructive'
+        })
+          .margin({ left: SPACE['4'], right: SPACE['4'], bottom: SPACE['2'] })
+      }
 
       Row() {
         MulticaText({

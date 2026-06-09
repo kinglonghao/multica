@@ -1,11 +1,12 @@
-import { QueryHandle, useQuery, QueryOptions } from './cache';
+import { QueryHandle, useQuery, QueryOptions, QueryKey } from './cache';
 import { api } from '../data/api';
 import { workspaceStore } from '../data/workspace';
 import { Project, ListProjectsResponse } from '../models/types';
 
-export function projectListKey(wsId: string | null) {
-  return ['projects', wsId] as const;
-}
+export const projectListKey: (wsId: string | null) => QueryKey =
+  (wsId: string | null): QueryKey => {
+    return ['projects', wsId];
+  };
 
 export function useProjectListQuery(onUpdate?: () => void): QueryHandle<ListProjectsResponse> {
   const wsId = workspaceStore.currentId;
@@ -18,9 +19,10 @@ export function useProjectListQuery(onUpdate?: () => void): QueryHandle<ListProj
   );
 }
 
-export function projectDetailKey(wsId: string | null, id: string) {
-  return ['project', wsId, id] as const;
-}
+export const projectDetailKey: (wsId: string | null, id: string) => QueryKey =
+  (wsId: string | null, id: string): QueryKey => {
+    return ['project', wsId, id];
+  };
 
 export function useProjectDetailQuery(
   id: string,

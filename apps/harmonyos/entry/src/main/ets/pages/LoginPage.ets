@@ -4,9 +4,8 @@ import { THEME, ColorScheme, SPACE, RADIUS } from '../lib/theme';
 import { MulticaText } from '../components/ui/Text';
 import { MulticaButton } from '../components/ui/Button';
 
-@Entry
 @ComponentV2
-struct LoginPage {
+export struct LoginPage {
   @Local email: string = '';
   @Local loading: boolean = false;
   @Local errorMessage: string = '';
@@ -42,69 +41,65 @@ struct LoginPage {
   }
 
   build() {
-    Navigation(appNavigation.stack) {
-      Stack({ alignContent: Alignment.Center }) {
-        Column() {
-          MulticaText({
-            value: 'Welcome to Multica',
-            scheme: this.scheme,
-            size: '2xl',
-            weight: 'bold',
-            color: 'foreground'
+    Stack({ alignContent: Alignment.Center }) {
+      Column() {
+        MulticaText({
+          value: 'Welcome to Multica',
+          scheme: this.scheme,
+          size: '2xl',
+          weight: 'bold',
+          color: 'foreground'
+        })
+        MulticaText({
+          value: 'Enter your email to receive a sign-in code',
+          scheme: this.scheme,
+          size: 'sm',
+          color: 'mutedForeground'
+        })
+          .margin({ top: SPACE['2'] })
+          .textAlign(TextAlign.Center)
+
+        TextInput({ placeholder: 'you@example.com', text: this.email })
+          .placeholderColor(String(THEME[this.scheme].mutedForeground))
+          .fontColor(String(THEME[this.scheme].foreground))
+          .backgroundColor(String(THEME[this.scheme].card))
+          .borderRadius(RADIUS.md)
+          .padding(SPACE['3'])
+          .width('100%')
+          .margin({ top: SPACE['8'] })
+          .type(InputType.Email)
+          .onChange((value: string) => {
+            this.email = value;
+            this.errorMessage = '';
           })
+
+        if (this.errorMessage) {
           MulticaText({
-            value: 'Enter your email to receive a sign-in code',
+            value: this.errorMessage,
             scheme: this.scheme,
             size: 'sm',
-            color: 'mutedForeground'
+            color: 'destructive'
           })
             .margin({ top: SPACE['2'] })
-            .textAlign(TextAlign.Center)
-
-          TextInput({ placeholder: 'you@example.com', text: this.email })
-            .placeholderColor(String(THEME[this.scheme].mutedForeground))
-            .fontColor(String(THEME[this.scheme].foreground))
-            .backgroundColor(String(THEME[this.scheme].card))
-            .borderRadius(RADIUS.md)
-            .padding(SPACE['3'])
             .width('100%')
-            .margin({ top: SPACE['8'] })
-            .type(InputType.Email)
-            .onChange((value: string) => {
-              this.email = value;
-              this.errorMessage = '';
-            })
-
-          if (this.errorMessage) {
-            MulticaText({
-              value: this.errorMessage,
-              scheme: this.scheme,
-              size: 'sm',
-              color: 'destructive'
-            })
-              .margin({ top: SPACE['2'] })
-              .width('100%')
-          }
-
-          MulticaButton({
-            label: this.loading ? 'Sending…' : 'Send sign-in code',
-            scheme: this.scheme,
-            variant: 'primary',
-            fullWidth: true,
-            disabled: this.loading,
-            onTap: () => { void this.sendCode(); }
-          })
-            .margin({ top: SPACE['4'] })
         }
-        .width('100%')
-        .padding(SPACE['6'])
-        .constraintSize({ maxWidth: 480 })
+
+        MulticaButton({
+          label: this.loading ? 'Sending…' : 'Send sign-in code',
+          scheme: this.scheme,
+          variant: 'primary',
+          fullWidth: true,
+          disabled: this.loading,
+          onTap: () => { void this.sendCode(); }
+        })
+          .margin({ top: SPACE['4'] })
       }
       .width('100%')
-      .height('100%')
-      .backgroundColor(String(THEME[this.scheme].background))
+      .padding(SPACE['6'])
+      .constraintSize({ maxWidth: 480 })
     }
-    .mode(NavigationMode.Stack)
-    .hideTitleBar(true)
+    .width('100%')
+    .height('100%')
+    .backgroundColor(String(THEME[this.scheme].background))
   }
 }

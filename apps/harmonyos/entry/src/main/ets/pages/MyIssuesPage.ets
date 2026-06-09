@@ -1,7 +1,6 @@
 import { appNavigation } from '../data/navigation';
 import { useIssueListQuery, QueryHandle } from '../queries/issue';
 import { THEME, ColorScheme, SPACE } from '../lib/theme';
-import { timeAgo } from '../lib/utils';
 import { MulticaText } from '../components/ui/Text';
 import { Header } from '../components/ui/Header';
 import { Skeleton } from '../components/ui/Skeleton';

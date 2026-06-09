@@ -1,11 +1,12 @@
-import { QueryHandle, useQuery, QueryOptions } from './cache';
+import { QueryHandle, useQuery, QueryOptions, QueryKey } from './cache';
 import { api } from '../data/api';
 import { workspaceStore } from '../data/workspace';
 import { Issue, ListIssuesParams, ListIssuesResponse } from '../models/types';
 
-export function issueListKey(wsId: string | null, params: ListIssuesParams = {}) {
-  return ['issues', wsId, JSON.stringify(params)] as const;
-}
+export const issueListKey: (wsId: string | null, params: ListIssuesParams) => QueryKey =
+  (wsId: string | null, params: ListIssuesParams): QueryKey => {
+    return ['issues', wsId, JSON.stringify(params)];
+  };
 
 export function useIssueListQuery(
   params: ListIssuesParams = {},
@@ -21,9 +22,10 @@ export function useIssueListQuery(
   );
 }
 
-export function issueDetailKey(wsId: string | null, id: string) {
-  return ['issue', wsId, id] as const;
-}
+export const issueDetailKey: (wsId: string | null, id: string) => QueryKey =
+  (wsId: string | null, id: string): QueryKey => {
+    return ['issue', wsId, id];
+  };
 
 export function useIssueDetailQuery(
   id: string,

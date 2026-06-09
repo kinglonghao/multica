@@ -8,9 +8,12 @@ import { IconButton } from '../components/ui/IconButton';
 import { IssueRow } from '../components/issue/IssueRow';
 import { ProjectRow } from '../components/project/ProjectRow';
 
-@Entry
+const DEBOUNCE_MS = 250;
+const SEARCH_TABS: ReadonlyArray<'issues' | 'projects' | 'pins'> = ['issues', 'projects', 'pins'];
+
 @ComponentV2
-struct SearchPage {
+export struct SearchPage {
+  @Param initialTab: 'issues' | 'projects' | 'pins' = 'issues';
   @Local scheme: ColorScheme = 'light';
   @Local tab: 'issues' | 'projects' | 'pins' = 'issues';
   @Local query: string = '';
@@ -18,14 +21,11 @@ struct SearchPage {
   @Local issueResults: Issue[] = [];
   @Local projectResults: Project[] = [];
   @Local pins: { id: string; label: string; sub: string }[] = [];
-  private debounceHandle: ReturnType<typeof setTimeout> | null = null;
+  private debounceHandle: number | null = null;
 
   aboutToAppear(): void {
     this.scheme = this.detectScheme();
-    const requested = appNavigation.stack.getParamByName('SearchPage')?.[0]?.['tab'] as string | undefined;
-    if (requested === 'projects' || requested === 'pins') {
-      this.tab = requested;
-    }
+    this.tab = this.initialTab;
     void this.loadPins();
   }
 
@@ -35,7 +35,7 @@ struct SearchPage {
 
   private onQuery(value: string): void {
     this.query = value;
-    if (this.debounceHandle) clearTimeout(this.debounceHandle);
+    if (this.debounceHandle !== null) clearTimeout(this.debounceHandle);
     this.debounceHandle = setTimeout(() => {
       this.debouncedQuery = value.trim();
       if (this.tab === 'issues') {
@@ -43,7 +43,7 @@ struct SearchPage {
       } else if (this.tab === 'projects') {
         void this.runProjectSearch();
       }
-    }, 250);
+    }, DEBOUNCE_MS);
   }
 
   private async runIssueSearch(): Promise<void> {
@@ -87,126 +87,122 @@ struct SearchPage {
   }
 
   build() {
-    Navigation(appNavigation.stack) {
-      Column() {
-        Header({
-          title: 'Search',
-          scheme: this.scheme,
-          left: this.BackButton()
-        })
+    Column() {
+      Header({
+        title: 'Search',
+        scheme: this.scheme,
+        left: this.BackButton()
+      })
 
-        Row() {
-          this.Tab('issues', 'Issues')
-          this.Tab('projects', 'Projects')
-          this.Tab('pins', 'Pinned')
-        }
-        .width('100%')
-        .padding(SPACE['2'])
-        .border({
-          width: { bottom: 1 },
-          color: String(THEME[this.scheme].border)
-        })
-
-        TextInput({ placeholder: 'Search…', text: this.query })
-          .placeholderColor(String(THEME[this.scheme].mutedForeground))
-          .fontColor(String(THEME[this.scheme].foreground))
-          .backgroundColor(String(THEME[this.scheme].card))
-          .borderRadius(RADIUS.md)
-          .padding(SPACE['3'])
-          .width('100%')
-          .margin({ top: SPACE['3'], left: SPACE['4'], right: SPACE['4'] })
-          .onChange((value: string) => { this.onQuery(value); })
-
-        if (this.tab === 'issues') {
-          Column() {
-            ForEach(this.issueResults, (issue: Issue) => {
-              IssueRow({
-                issue: issue,
-                scheme: this.scheme,
-                onPress: () => { appNavigation.pushName('IssueDetailPage', { id: issue.id }); }
-              })
-            })
-            if (this.issueResults.length === 0 && this.debouncedQuery.length > 0) {
-              MulticaText({
-                value: 'No issues match your search',
-                scheme: this.scheme,
-                size: 'sm',
-                color: 'mutedForeground',
-                textAlign: TextAlign.Center
-              })
-                .padding(SPACE['6'])
-            }
-          }
-          .layoutWeight(1)
-          .width('100%')
-        } else if (this.tab === 'projects') {
-          Column() {
-            ForEach(this.projectResults, (project: Project) => {
-              ProjectRow({
-                project: project,
-                scheme: this.scheme,
-                onPress: () => { appNavigation.pushName('ProjectDetailPage', { id: project.id }); }
-              })
-            })
-            if (this.projectResults.length === 0 && this.debouncedQuery.length > 0) {
-              MulticaText({
-                value: 'No projects match your search',
-                scheme: this.scheme,
-                size: 'sm',
-                color: 'mutedForeground',
-                textAlign: TextAlign.Center
-              })
-                .padding(SPACE['6'])
-            }
-          }
-          .layoutWeight(1)
-          .width('100%')
-        } else {
-          Column() {
-            ForEach(this.pins, (pin) => {
-              Row() {
-                MulticaText({
-                  value: pin.label,
-                  scheme: this.scheme,
-                  size: 'base',
-                  color: 'foreground'
-                })
-                Blank()
-                MulticaText({
-                  value: pin.sub,
-                  scheme: this.scheme,
-                  size: 'xs',
-                  color: 'mutedForeground'
-                })
-              }
-              .width('100%')
-              .padding(SPACE['4'])
-              .border({
-                width: { bottom: 1 },
-                color: String(THEME[this.scheme].border)
-              })
-            })
-            if (this.pins.length === 0) {
-              MulticaText({
-                value: 'No pinned items yet',
-                scheme: this.scheme,
-                size: 'sm',
-                color: 'mutedForeground',
-                textAlign: TextAlign.Center
-              })
-                .padding(SPACE['6'])
-            }
-          }
-          .layoutWeight(1)
-          .width('100%')
-        }
+      Row() {
+        this.Tab('issues', 'Issues')
+        this.Tab('projects', 'Projects')
+        this.Tab('pins', 'Pinned')
       }
       .width('100%')
-      .height('100%')
-      .backgroundColor(String(THEME[this.scheme].background))
+      .padding(SPACE['2'])
+      .border({
+        width: { bottom: 1 },
+        color: String(THEME[this.scheme].border)
+      })
+
+      TextInput({ placeholder: 'Search…', text: this.query })
+        .placeholderColor(String(THEME[this.scheme].mutedForeground))
+        .fontColor(String(THEME[this.scheme].foreground))
+        .backgroundColor(String(THEME[this.scheme].card))
+        .borderRadius(RADIUS.md)
+        .padding(SPACE['3'])
+        .width('100%')
+        .margin({ top: SPACE['3'], left: SPACE['4'], right: SPACE['4'] })
+        .onChange((value: string) => { this.onQuery(value); })
+
+      if (this.tab === 'issues') {
+        Column() {
+          ForEach(this.issueResults, (issue: Issue) => {
+            IssueRow({
+              issue: issue,
+              scheme: this.scheme,
+              onPress: () => { appNavigation.pushName('IssueDetailPage', { id: issue.id }); }
+            })
+          })
+          if (this.issueResults.length === 0 && this.debouncedQuery.length > 0) {
+            MulticaText({
+              value: 'No issues match your search',
+              scheme: this.scheme,
+              size: 'sm',
+              color: 'mutedForeground',
+              textAlign: TextAlign.Center
+            })
+              .padding(SPACE['6'])
+          }
+        }
+        .layoutWeight(1)
+        .width('100%')
+      } else if (this.tab === 'projects') {
+        Column() {
+          ForEach(this.projectResults, (project: Project) => {
+            ProjectRow({
+              project: project,
+              scheme: this.scheme,
+              onPress: () => { appNavigation.pushName('ProjectDetailPage', { id: project.id }); }
+            })
+          })
+          if (this.projectResults.length === 0 && this.debouncedQuery.length > 0) {
+            MulticaText({
+              value: 'No projects match your search',
+              scheme: this.scheme,
+              size: 'sm',
+              color: 'mutedForeground',
+              textAlign: TextAlign.Center
+            })
+              .padding(SPACE['6'])
+          }
+        }
+        .layoutWeight(1)
+        .width('100%')
+      } else {
+        Column() {
+          ForEach(this.pins, (pin) => {
+            Row() {
+              MulticaText({
+                value: pin.label,
+                scheme: this.scheme,
+                size: 'base',
+                color: 'foreground'
+              })
+              Blank()
+              MulticaText({
+                value: pin.sub,
+                scheme: this.scheme,
+                size: 'xs',
+                color: 'mutedForeground'
+              })
+            }
+            .width('100%')
+            .padding(SPACE['4'])
+            .border({
+              width: { bottom: 1 },
+              color: String(THEME[this.scheme].border)
+            })
+          })
+          if (this.pins.length === 0) {
+            MulticaText({
+              value: 'No pinned items yet',
+              scheme: this.scheme,
+              size: 'sm',
+              color: 'mutedForeground',
+              textAlign: TextAlign.Center
+            })
+              .padding(SPACE['6'])
+          }
+        }
+        .layoutWeight(1)
+        .width('100%')
+      }
     }
-    .mode(NavigationMode.Stack)
-    .hideTitleBar(true)
+    .width('100%')
+    .height('100%')
+    .backgroundColor(String(THEME[this.scheme].background))
   }
 
   @Builder Tab(name: 'issues' | 'projects' | 'pins', label: string) {
