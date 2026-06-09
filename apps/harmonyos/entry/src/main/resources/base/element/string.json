@@ -1,0 +1,16 @@
+{
+  "string": [
+    {
+      "name": "module_desc",
+      "value": "Multica HarmonyOS mobile client — AI-native task management"
+    },
+    {
+      "name": "EntryAbility_desc",
+      "value": "Main entry ability for Multica"
+    },
+    {
+      "name": "EntryAbility_label",
+      "value": "Multica"
+    }
+  ]
+}

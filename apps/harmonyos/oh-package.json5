@@ -1,0 +1,12 @@
+{
+  "modelVersion": "5.0.0",
+  "name": "multica_harmonyos",
+  "version": "0.1.0",
+  "description": "Multica HarmonyOS mobile client",
+  "dependencies": {},
+  "devDependencies": {
+    "@ohos/hypium": "1.0.21",
+    "@ohos/hvigor-ohos-plugin": "5.0.5",
+    "@ohos/hvigor": "5.0.5"
+  }
+}

@@ -1,0 +1,5 @@
+# Obfuscation rules placeholder. Enabled in release builds via
+# build-profile.json5 → buildOptionSet[name=release]. Real rules should
+# be added once a release pipeline exists; for now keep the file present
+# so the build doesn't fail on a missing rules file.
+-disable-obfuscation

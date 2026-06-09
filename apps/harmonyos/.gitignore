@@ -1,0 +1,16 @@
+# Build outputs
+build/
+node_modules/
+oh_modules/
+
+# IDE
+.idea/
+.vscode/
+*.iml
+
+# Local config
+local.properties
+.hvigor/
+
+# Logs
+*.log
