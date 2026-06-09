@@ -1,5 +1,4 @@
-import router from '@ohos.router';
-import promptAction from '@ohos.promptAction';
+import { appNavigation } from '../data/navigation';
 import { api } from '../data/api';
 import { CreateIssueRequest, IssueStatus, IssuePriority } from '../models/types';
 import { THEME, ColorScheme, SPACE, RADIUS } from '../lib/theme';
@@ -12,15 +11,15 @@ import { StatusIcon } from '../components/ui/StatusIcon';
 import { PriorityIcon } from '../components/ui/PriorityIcon';
 
 @Entry
-@Component
+@ComponentV2
 struct NewIssuePage {
-  @State scheme: ColorScheme = 'light';
-  @State title: string = '';
-  @State description: string = '';
-  @State status: IssueStatus = 'todo';
-  @State priority: IssuePriority = 'no_priority';
-  @State saving: boolean = false;
-  @State errorMessage: string = '';
+  @Local scheme: ColorScheme = 'light';
+  @Local title: string = '';
+  @Local description: string = '';
+  @Local status: IssueStatus = 'todo';
+  @Local priority: IssuePriority = 'no_priority';
+  @Local saving: boolean = false;
+  @Local errorMessage: string = '';
 
   aboutToAppear(): void {
     this.scheme = this.detectScheme();
@@ -45,7 +44,7 @@ struct NewIssuePage {
         priority: this.priority
       };
       const issue = await api.createIssue(req);
-      router.replaceUrl({ url: 'pages/IssueDetailPage', params: { id: issue.id } });
+      appNavigation.replaceName('IssueDetailPage', { id: issue.id });
     } catch (err) {
       this.errorMessage = err instanceof Error ? err.message : 'Failed to create issue';
     } finally {
@@ -54,85 +53,89 @@ struct NewIssuePage {
   }
 
   build() {
-    Column() {
-      Header({
-        title: 'New issue',
-        scheme: this.scheme,
-        left: this.CancelButton(),
-        right: this.SubmitButton()
-      })
+    Navigation(appNavigation.stack) {
+      Column() {
+        Header({
+          title: 'New issue',
+          scheme: this.scheme,
+          left: this.CancelButton(),
+          right: this.SubmitButton()
+        })
 
-      Scroll() {
-        Column() {
-          MulticaText({
-            value: 'Title',
-            scheme: this.scheme,
-            size: 'sm',
-            weight: 'medium',
-            color: 'foreground'
-          })
-            .margin({ top: SPACE['4'] })
-
-          TextInput({ placeholder: 'What needs to be done?', text: this.title })
-            .placeholderColor(String(THEME[this.scheme].mutedForeground))
-            .fontColor(String(THEME[this.scheme].foreground))
-            .backgroundColor(String(THEME[this.scheme].card))
-            .borderRadius(RADIUS.md)
-            .padding(SPACE['3'])
-            .width('100%')
-            .margin({ top: SPACE['2'] })
-            .onChange((value: string) => {
-              this.title = value;
-              this.errorMessage = '';
-            })
-
-          MulticaText({
-            value: 'Description',
-            scheme: this.scheme,
-            size: 'sm',
-            weight: 'medium',
-            color: 'foreground'
-          })
-            .margin({ top: SPACE['4'] })
-
-          TextArea({ placeholder: 'Add more context (optional)', text: this.description })
-            .placeholderColor(String(THEME[this.scheme].mutedForeground))
-            .fontColor(String(THEME[this.scheme].foreground))
-            .backgroundColor(String(THEME[this.scheme].card))
-            .borderRadius(RADIUS.md)
-            .padding(SPACE['3'])
-            .width('100%')
-            .height(120)
-            .margin({ top: SPACE['2'] })
-            .onChange((value: string) => {
-              this.description = value;
-            })
-
-          this.PickerRow('Status', statusLabel(this.status), () => this.cycleStatus())
-          this.PickerRow('Priority', priorityLabel(this.priority), () => this.cyclePriority())
-
-          if (this.errorMessage) {
+        Scroll() {
+          Column() {
             MulticaText({
-              value: this.errorMessage,
+              value: 'Title',
               scheme: this.scheme,
               size: 'sm',
-              color: 'destructive'
+              weight: 'medium',
+              color: 'foreground'
             })
+              .margin({ top: SPACE['4'] })
+
+            TextInput({ placeholder: 'What needs to be done?', text: this.title })
+              .placeholderColor(String(THEME[this.scheme].mutedForeground))
+              .fontColor(String(THEME[this.scheme].foreground))
+              .backgroundColor(String(THEME[this.scheme].card))
+              .borderRadius(RADIUS.md)
+              .padding(SPACE['3'])
+              .width('100%')
               .margin({ top: SPACE['2'] })
+              .onChange((value: string) => {
+                this.title = value;
+                this.errorMessage = '';
+              })
+
+            MulticaText({
+              value: 'Description',
+              scheme: this.scheme,
+              size: 'sm',
+              weight: 'medium',
+              color: 'foreground'
+            })
+              .margin({ top: SPACE['4'] })
+
+            TextArea({ placeholder: 'Add more context (optional)', text: this.description })
+              .placeholderColor(String(THEME[this.scheme].mutedForeground))
+              .fontColor(String(THEME[this.scheme].foreground))
+              .backgroundColor(String(THEME[this.scheme].card))
+              .borderRadius(RADIUS.md)
+              .padding(SPACE['3'])
+              .width('100%')
+              .height(120)
+              .margin({ top: SPACE['2'] })
+              .onChange((value: string) => {
+                this.description = value;
+              })
+
+            this.PickerRow('Status', statusLabel(this.status))
+            this.PickerRow('Priority', priorityLabel(this.priority))
+
+            if (this.errorMessage) {
+              MulticaText({
+                value: this.errorMessage,
+                scheme: this.scheme,
+                size: 'sm',
+                color: 'destructive'
+              })
+                .margin({ top: SPACE['2'] })
+            }
           }
+          .padding(SPACE['4'])
+          .alignItems(HorizontalAlign.Start)
         }
-        .padding(SPACE['4'])
-        .alignItems(HorizontalAlign.Start)
+        .layoutWeight(1)
+        .width('100%')
       }
-      .layoutWeight(1)
       .width('100%')
+      .height('100%')
+      .backgroundColor(String(THEME[this.scheme].background))
     }
-    .width('100%')
-    .height('100%')
-    .backgroundColor(String(THEME[this.scheme].background))
+    .mode(NavigationMode.Stack)
+    .hideTitleBar(true)
   }
 
-  @Builder PickerRow(label: string, value: string, onTap: () => void) {
+  @Builder PickerRow(label: string, value: string) {
     Row() {
       MulticaText({
         value: label,
@@ -160,7 +163,13 @@ struct NewIssuePage {
     .backgroundColor(String(THEME[this.scheme].card))
     .borderRadius(RADIUS.md)
     .margin({ top: SPACE['3'] })
-    .onClick(() => { onTap(); })
+    .onClick(() => {
+      if (label === 'Status') {
+        this.cycleStatus();
+      } else {
+        this.cyclePriority();
+      }
+    })
   }
 
   @Builder CancelButton() {
@@ -168,7 +177,7 @@ struct NewIssuePage {
       glyph: '×',
       scheme: this.scheme,
       accessibilityLabel: 'Cancel',
-      onTap: () => { router.back(); }
+      onTap: () => { appNavigation.pop(); }
     })
   }
 

@@ -1,6 +1,6 @@
-import router from '@ohos.router';
+import { appNavigation } from '../data/navigation';
 import { api } from '../data/api';
-import { useQuery } from '../queries/cache';
+import { useQuery, QueryHandle } from '../queries/cache';
 import { ChatSession } from '../models/types';
 import { THEME, ColorScheme, SPACE } from '../lib/theme';
 import { timeAgo } from '../lib/utils';
@@ -9,17 +9,23 @@ import { Header } from '../components/ui/Header';
 import { Avatar } from '../components/ui/Avatar';
 import { Skeleton } from '../components/ui/Skeleton';
 
-@Component
+@ComponentV2
 export struct ChatPage {
-  @State scheme: ColorScheme = 'light';
-  private query = useQuery<ChatSession[]>(
-    ['chat-sessions'],
-    ({ signal }) => api.listChatSessions({ signal }),
-    { staleTimeMs: 30_000 }
-  );
+  @Local scheme: ColorScheme = 'light';
+  @Local version: number = 0;
+  private query: QueryHandle<ChatSession[]> | null = null;
 
   aboutToAppear(): void {
     this.scheme = this.detectScheme();
+    this.query = useQuery<ChatSession[]>(
+      ['chat-sessions'],
+      ({ signal }) => api.listChatSessions({ signal }),
+      { staleTimeMs: 30_000, onUpdate: () => { this.version++; } }
+    );
+  }
+
+  aboutToDisappear(): void {
+    this.query?.unsubscribe();
   }
 
   private detectScheme(): ColorScheme {
@@ -30,7 +36,11 @@ export struct ChatPage {
     Column() {
       Header({ title: 'Chat', scheme: this.scheme })
 
-      if (this.query.state.isLoading) {
+      if (!this.query) {
+        return;
+      }
+      const state = this.query.getState();
+      if (state.isLoading) {
         Column() {
           ForEach([1, 2, 3, 4], () => {
             Row() {
@@ -48,7 +58,7 @@ export struct ChatPage {
           })
         }
       } else {
-        const sessions = this.query.state.data ?? [];
+        const sessions = state.data ?? [];
         if (sessions.length === 0) {
           Stack({ alignContent: Alignment.Center }) {
             MulticaText({
@@ -106,7 +116,7 @@ export struct ChatPage {
                 }
                 .padding(SPACE['4'])
                 .onClick(() => {
-                  router.pushUrl({ url: 'pages/IssueDetailPage', params: { id: session.id } });
+                  appNavigation.pushName('IssueDetailPage', { id: session.id });
                 })
               }
               .divider({ strokeWidth: 1, color: String(THEME[this.scheme].border) })

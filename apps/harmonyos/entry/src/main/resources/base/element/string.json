@@ -11,6 +11,22 @@
     {
       "name": "EntryAbility_label",
       "value": "Multica"
+    },
+    {
+      "name": "nav_inbox",
+      "value": "Inbox"
+    },
+    {
+      "name": "nav_my_issues",
+      "value": "My Issues"
+    },
+    {
+      "name": "nav_chat",
+      "value": "Chat"
+    },
+    {
+      "name": "nav_more",
+      "value": "More"
     }
   ]
 }

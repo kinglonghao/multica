@@ -1,10 +1,10 @@
-import { THEME, ColorScheme, SPACE, FONT_SIZE, FONT_WEIGHT } from '../../lib/theme';
+import { THEME, ColorScheme, SPACE } from '../../lib/theme';
 import { MulticaText } from './Text';
 
-@Component
+@ComponentV2
 export struct Header {
-  @Prop title: string = '';
-  @Prop scheme: ColorScheme = 'light';
+  @Param title: string = '';
+  @Param scheme: ColorScheme = 'light';
   @BuilderParam left?: CustomBuilder;
   @BuilderParam right?: CustomBuilder;
 

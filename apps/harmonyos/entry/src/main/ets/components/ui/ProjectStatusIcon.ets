@@ -3,11 +3,11 @@ import { ColorScheme } from '../../lib/theme';
 import { projectStatusColor, projectPriorityColor } from '../../lib/project-status';
 import { MulticaText } from './Text';
 
-@Component
+@ComponentV2
 export struct ProjectStatusIcon {
-  @Prop status: ProjectStatus | string = 'planned';
-  @Prop scheme: ColorScheme = 'light';
-  @Prop size: number = 16;
+  @Param status: ProjectStatus | string = 'planned';
+  @Param scheme: ColorScheme = 'light';
+  @Param size: number = 16;
 
   build() {
     Stack({ alignContent: Alignment.Center }) {
@@ -37,11 +37,11 @@ export struct ProjectStatusIcon {
   }
 }
 
-@Component
+@ComponentV2
 export struct ProjectPriorityIcon {
-  @Prop priority: ProjectPriority | string = 'no_priority';
-  @Prop scheme: ColorScheme = 'light';
-  @Prop size: number = 16;
+  @Param priority: ProjectPriority | string = 'no_priority';
+  @Param scheme: ColorScheme = 'light';
+  @Param size: number = 16;
 
   build() {
     Stack({ alignContent: Alignment.Center }) {

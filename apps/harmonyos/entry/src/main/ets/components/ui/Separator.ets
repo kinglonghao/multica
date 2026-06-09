@@ -1,9 +1,9 @@
 import { THEME, ColorScheme } from '../../lib/theme';
 
-@Component
+@ComponentV2
 export struct Separator {
-  @Prop scheme: ColorScheme = 'light';
-  @Prop orientation: 'horizontal' | 'vertical' = 'horizontal';
+  @Param scheme: ColorScheme = 'light';
+  @Param orientation: 'horizontal' | 'vertical' = 'horizontal';
 
   build() {
     if (this.orientation === 'horizontal') {

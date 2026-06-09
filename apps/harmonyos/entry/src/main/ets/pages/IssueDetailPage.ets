@@ -1,5 +1,5 @@
-import router from '@ohos.router';
-import { useIssueDetailQuery } from '../queries/issue';
+import { appNavigation } from '../data/navigation';
+import { useIssueDetailQuery, QueryHandle } from '../queries/issue';
 import { THEME, ColorScheme, SPACE, RADIUS } from '../lib/theme';
 import { timeAgo } from '../lib/utils';
 import { statusLabel, priorityLabel } from '../lib/issue-status';
@@ -10,19 +10,17 @@ import { StatusIcon } from '../components/ui/StatusIcon';
 import { PriorityIcon } from '../components/ui/PriorityIcon';
 import { Avatar } from '../components/ui/Avatar';
 import { IconButton } from '../components/ui/IconButton';
-import { MulticaButton } from '../components/ui/Button';
 import { Card } from '../components/ui/Card';
+import { Issue } from '../models/types';
 
 @Entry
-@Component
+@ComponentV2
 struct IssueDetailPage {
-  @State scheme: ColorScheme = 'light';
-  @State issueId: string = '';
+  @Local scheme: ColorScheme = 'light';
+  @Local issueId: string = '';
 
   aboutToAppear(): void {
     this.scheme = this.detectScheme();
-    const params = router.getParams() as Record<string, string> | undefined;
-    this.issueId = params?.['id'] ?? '';
   }
 
   private detectScheme(): ColorScheme {
@@ -30,21 +28,32 @@ struct IssueDetailPage {
   }
 
   build() {
-    Column() {
-      Header({
-        title: this.issueId ? 'Issue' : 'Loading…',
-        scheme: this.scheme,
-        left: this.BackButton()
-      })
+    Navigation(appNavigation.stack) {
+      Column() {
+        Header({
+          title: this.issueId ? 'Issue' : 'Loading…',
+          scheme: this.scheme,
+          left: this.BackButton()
+        })
 
-      if (!this.issueId) {
-        return this.ErrorState('No issue id provided');
+        if (!this.issueId) {
+          MulticaText({
+            value: 'No issue id provided',
+            scheme: this.scheme,
+            size: 'sm',
+            color: 'destructive'
+          })
+            .padding(SPACE['4'])
+        } else {
+          this.Body()
+        }
       }
-      this.Body()
+      .width('100%')
+      .height('100%')
+      .backgroundColor(String(THEME[this.scheme].background))
     }
-    .width('100%')
-    .height('100%')
-    .backgroundColor(String(THEME[this.scheme].background))
+    .mode(NavigationMode.Stack)
+    .hideTitleBar(true)
   }
 
   @Builder BackButton() {
@@ -52,18 +61,8 @@ struct IssueDetailPage {
       glyph: '‹',
       scheme: this.scheme,
       accessibilityLabel: 'Back',
-      onTap: () => { router.back(); }
+      onTap: () => { appNavigation.pop(); }
     })
-  }
-
-  @Builder ErrorState(message: string) {
-    MulticaText({
-      value: message,
-      scheme: this.scheme,
-      size: 'sm',
-      color: 'destructive'
-    })
-      .padding(SPACE['4'])
   }
 
   @Builder Body() {
@@ -71,26 +70,48 @@ struct IssueDetailPage {
   }
 }
 
-@Component
+@ComponentV2
 struct IssueDetailBody {
-  @ObjectLink issue: any; // Use a typed handle if we want type-safety; the cache type is Issue
-  @State scheme: ColorScheme = 'light';
-  @Prop issueId: string = '';
-  private query = useIssueDetailQuery(this.issueId);
+  @Param issueId: string = '';
+  @Param scheme: ColorScheme = 'light';
+  @Local version: number = 0;
+  private query: QueryHandle<Issue> | null = null;
 
   aboutToAppear(): void {
-    this.scheme = this.scheme;
+    // The query handle MUST be set up in aboutToAppear, NOT in a field
+    // initializer. Field initializers run before aboutToAppear, and at
+    // that point this.issueId is still '' (the parent's @Param doesn't
+    // reach the child until the parent has rendered). Subscribing with
+    // the empty key would have made the first fetch hit '/api/issues/'
+    // and return 404 — the v0.1 bug from the code review.
+    this.query = useIssueDetailQuery(this.issueId, () => { this.version++; });
+  }
+
+  aboutToDisappear(): void {
+    this.query?.unsubscribe();
   }
 
   build() {
+    if (!this.query) {
+      Column() {
+        Skeleton({ scheme: this.scheme, width: 80, height: 12, radius: 4 })
+        Skeleton({ scheme: this.scheme, width: '90%', height: 28, radius: 6 })
+          .margin({ top: SPACE['2'] })
+      }
+      .padding(SPACE['4'])
+      .width('100%')
+      .alignItems(HorizontalAlign.Start)
+      return;
+    }
+    const state = this.query.getState();
     Scroll() {
       Column() {
-        if (this.query.state.isLoading) {
+        if (state.isLoading) {
           this.Loading()
-        } else if (this.query.state.error) {
-          this.ErrorState(this.query.state.error!.message)
-        } else if (this.query.state.data) {
-          const issue = this.query.state.data;
+        } else if (state.error) {
+          this.ErrorState(state.error!.message)
+        } else if (state.data) {
+          const issue = state.data;
           Column() {
             MulticaText({
               value: issue.identifier,

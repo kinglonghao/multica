@@ -1,4 +1,4 @@
-import router from '@ohos.router';
+import { appNavigation } from '../data/navigation';
 import { authStore } from '../data/auth';
 import { workspaceStore } from '../data/workspace';
 import { wsClient } from '../realtime/ws-client';
@@ -12,12 +12,12 @@ interface MenuItem {
   onPress: () => void;
 }
 
-@Component
+@ComponentV2
 export struct MorePage {
-  @State scheme: ColorScheme = 'light';
-  @State userName: string = '';
-  @State userEmail: string = '';
-  @State workspaceName: string = '';
+  @Local scheme: ColorScheme = 'light';
+  @Local userName: string = '';
+  @Local userEmail: string = '';
+  @Local workspaceName: string = '';
 
   aboutToAppear(): void {
     this.scheme = this.detectScheme();
@@ -39,7 +39,7 @@ export struct MorePage {
     wsClient.disconnect();
     await workspaceStore.clear();
     await authStore.logout();
-    router.replaceUrl({ url: 'pages/LoginPage' });
+    appNavigation.replaceName('LoginPage');
   }
 
   build() {
@@ -70,7 +70,7 @@ export struct MorePage {
       }
       .width('100%')
       .padding(SPACE['4'])
-      .onClick(() => { router.pushUrl({ url: 'pages/ProfilePage' }); })
+      .onClick(() => { appNavigation.pushName('ProfilePage'); })
 
       if (this.workspaceName) {
         Row() {
@@ -83,17 +83,17 @@ export struct MorePage {
         }
         .width('100%')
         .padding({ left: SPACE['4'], right: SPACE['4'], bottom: SPACE['2'] })
-        .onClick(() => { router.pushUrl({ url: 'pages/SwitchWorkspacePage' }); })
+        .onClick(() => { appNavigation.pushName('SwitchWorkspacePage'); })
       }
 
       this.MenuList([
-        { label: 'Projects', onPress: () => router.pushUrl({ url: 'pages/SearchPage', params: { tab: 'projects' } }) },
-        { label: 'Issues', onPress: () => router.pushUrl({ url: 'pages/SearchPage', params: { tab: 'issues' } }) },
-        { label: 'Pinned', onPress: () => router.pushUrl({ url: 'pages/SearchPage', params: { tab: 'pins' } }) },
-        { label: 'Agents', onPress: () => router.pushUrl({ url: 'pages/AgentsPage' }) },
-        { label: 'Notifications', onPress: () => router.pushUrl({ url: 'pages/NotificationsPage' }) },
-        { label: 'Profile', onPress: () => router.pushUrl({ url: 'pages/ProfilePage' }) },
-        { label: 'Switch workspace', onPress: () => router.pushUrl({ url: 'pages/SwitchWorkspacePage' }) }
+        { label: 'Projects', onPress: () => appNavigation.pushName('SearchPage', { tab: 'projects' }) },
+        { label: 'Issues', onPress: () => appNavigation.pushName('SearchPage', { tab: 'issues' }) },
+        { label: 'Pinned', onPress: () => appNavigation.pushName('SearchPage', { tab: 'pins' }) },
+        { label: 'Agents', onPress: () => appNavigation.pushName('AgentsPage') },
+        { label: 'Notifications', onPress: () => appNavigation.pushName('NotificationsPage') },
+        { label: 'Profile', onPress: () => appNavigation.pushName('ProfilePage') },
+        { label: 'Switch workspace', onPress: () => appNavigation.pushName('SwitchWorkspacePage') }
       ])
 
       Blank()

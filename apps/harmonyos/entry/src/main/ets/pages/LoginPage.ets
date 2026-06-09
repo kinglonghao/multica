@@ -1,18 +1,16 @@
-import router from '@ohos.router';
-import promptAction from '@ohos.promptAction';
+import { appNavigation } from '../data/navigation';
 import { authStore } from '../data/auth';
 import { THEME, ColorScheme, SPACE, RADIUS } from '../lib/theme';
 import { MulticaText } from '../components/ui/Text';
 import { MulticaButton } from '../components/ui/Button';
-import { globalEvents } from '../data/auth';
 
 @Entry
-@Component
+@ComponentV2
 struct LoginPage {
-  @State email: string = '';
-  @State loading: boolean = false;
-  @State errorMessage: string = '';
-  @State scheme: ColorScheme = 'light';
+  @Local email: string = '';
+  @Local loading: boolean = false;
+  @Local errorMessage: string = '';
+  @Local scheme: ColorScheme = 'light';
 
   aboutToAppear(): void {
     this.scheme = this.detectScheme();
@@ -35,7 +33,7 @@ struct LoginPage {
     this.errorMessage = '';
     try {
       await authStore.requestOtp(this.email);
-      router.pushUrl({ url: 'pages/VerifyPage', params: { email: this.email } });
+      appNavigation.pushName('VerifyPage', { email: this.email });
     } catch (err) {
       this.errorMessage = err instanceof Error ? err.message : 'Failed to send code';
     } finally {
@@ -44,65 +42,69 @@ struct LoginPage {
   }
 
   build() {
-    Stack({ alignContent: Alignment.Center }) {
-      Column() {
-        MulticaText({
-          value: 'Welcome to Multica',
-          scheme: this.scheme,
-          size: '2xl',
-          weight: 'bold',
-          color: 'foreground'
-        })
-        MulticaText({
-          value: 'Enter your email to receive a sign-in code',
-          scheme: this.scheme,
-          size: 'sm',
-          color: 'mutedForeground'
-        })
-          .margin({ top: SPACE['2'] })
-          .textAlign(TextAlign.Center)
-
-        TextInput({ placeholder: 'you@example.com', text: this.email })
-          .placeholderColor(String(THEME[this.scheme].mutedForeground))
-          .fontColor(String(THEME[this.scheme].foreground))
-          .backgroundColor(String(THEME[this.scheme].card))
-          .borderRadius(RADIUS.md)
-          .padding(SPACE['3'])
-          .width('100%')
-          .margin({ top: SPACE['8'] })
-          .type(InputType.Email)
-          .onChange((value: string) => {
-            this.email = value;
-            this.errorMessage = '';
-          })
-
-        if (this.errorMessage) {
+    Navigation(appNavigation.stack) {
+      Stack({ alignContent: Alignment.Center }) {
+        Column() {
           MulticaText({
-            value: this.errorMessage,
+            value: 'Welcome to Multica',
+            scheme: this.scheme,
+            size: '2xl',
+            weight: 'bold',
+            color: 'foreground'
+          })
+          MulticaText({
+            value: 'Enter your email to receive a sign-in code',
             scheme: this.scheme,
             size: 'sm',
-            color: 'destructive'
+            color: 'mutedForeground'
           })
             .margin({ top: SPACE['2'] })
-            .width('100%')
-        }
+            .textAlign(TextAlign.Center)
 
-        MulticaButton({
-          label: this.loading ? 'Sending…' : 'Send sign-in code',
-          scheme: this.scheme,
-          variant: 'primary',
-          fullWidth: true,
-          disabled: this.loading,
-          onTap: () => { void this.sendCode(); }
-        })
-          .margin({ top: SPACE['4'] })
+          TextInput({ placeholder: 'you@example.com', text: this.email })
+            .placeholderColor(String(THEME[this.scheme].mutedForeground))
+            .fontColor(String(THEME[this.scheme].foreground))
+            .backgroundColor(String(THEME[this.scheme].card))
+            .borderRadius(RADIUS.md)
+            .padding(SPACE['3'])
+            .width('100%')
+            .margin({ top: SPACE['8'] })
+            .type(InputType.Email)
+            .onChange((value: string) => {
+              this.email = value;
+              this.errorMessage = '';
+            })
+
+          if (this.errorMessage) {
+            MulticaText({
+              value: this.errorMessage,
+              scheme: this.scheme,
+              size: 'sm',
+              color: 'destructive'
+            })
+              .margin({ top: SPACE['2'] })
+              .width('100%')
+          }
+
+          MulticaButton({
+            label: this.loading ? 'Sending…' : 'Send sign-in code',
+            scheme: this.scheme,
+            variant: 'primary',
+            fullWidth: true,
+            disabled: this.loading,
+            onTap: () => { void this.sendCode(); }
+          })
+            .margin({ top: SPACE['4'] })
+        }
+        .width('100%')
+        .padding(SPACE['6'])
+        .constraintSize({ maxWidth: 480 })
       }
       .width('100%')
-      .padding(SPACE['6'])
-      .constraintSize({ maxWidth: 480 })
+      .height('100%')
+      .backgroundColor(String(THEME[this.scheme].background))
     }
-    .width('100%')
-    .height('100%')
-    .backgroundColor(String(THEME[this.scheme].background))
+    .mode(NavigationMode.Stack)
+    .hideTitleBar(true)
   }
 }

@@ -9,18 +9,31 @@
  * AbortController so the same "cancellation" contract from
  * apps/mobile/CLAUDE.md §4 holds here.
  *
- * When the page tears down (or the user navigates away), the caller
- * calls `queryClient.cancel(key)` and the in-flight request's signal
- * fires, the API client destroys the HTTP task, and the resolver
- * rejects with ApiError(0). That matches iOS exactly.
+ * REACTIVITY (V2):
+ * ArkUI doesn't auto-track reads inside a plain object — when the
+ * cache state mutates, the page won't re-render unless we explicitly
+ * trigger it. We do that by giving the page an `onUpdate` callback
+ * to bump a `@Local version: number` on the page side. The page
+ * passes the callback into `useQuery`; the cache fires it on every
+ * state change. The pattern is:
  *
- * Usage:
- *   const inbox = useQuery(
- *     () => ['inbox', wsId],
- *     ({ signal }) => api.listInbox({ signal }),
- *     { staleTimeMs: 30_000 }
- *   );
- *   // inbox: { data, error, isLoading, isRefetching, refetch }
+ *   @Local version: number = 0;
+ *   private query: QueryHandle<Issue> | null = null;
+ *
+ *   aboutToAppear() {
+ *     this.query = useIssueDetailQuery(this.issueId, () => { this.version++; });
+ *   }
+ *
+ *   build() {
+ *     // Re-reads on every re-render triggered by version++.
+ *     const s = this.query!.getState();
+ *     if (s.isLoading) { ... }
+ *   }
+ *
+ * The `getState()` getter is what makes the read fresh after a
+ * re-render. The earlier v0.1 used a captured-at-subscribe `state`
+ * object that the page stored and never refreshed — that was the
+ * bug behind the "page only reads state once" code-review finding.
  */
 
 import { ApiError } from '../data/api';
@@ -33,26 +46,41 @@ export interface QueryState<T> {
   updatedAt: number | null;
 }
 
-type QueryKey = readonly unknown[];
+export type QueryKey = readonly unknown[];
 
-type Fetcher<T> = (ctx: { signal: AbortSignal }) => Promise<T>;
+export type Fetcher<T> = (ctx: { signal: AbortSignal }) => Promise<T>;
 
 interface InternalEntry<T> {
   state: QueryState<T>;
   controller: AbortController | null;
   inflight: Promise<T> | null;
   staleTimeMs: number;
-  observers: Set<(s: QueryState<T>) => void>;
+  observers: Set<() => void>;
+}
+
+export interface QueryOptions {
+  staleTimeMs?: number;
+  enabled?: boolean;
+  /** Fired on every state change. Used by the page to bump a
+   *  `@Local version` counter and trigger a re-render. */
+  onUpdate?: () => void;
+}
+
+export interface QueryHandle<T> {
+  /** Read the current state. Safe to call inside `build()`. */
+  getState: () => QueryState<T>;
+  /** Force a fresh fetch. */
+  refetch: () => void;
+  /** Abort the in-flight request, if any. Does NOT drop the cached
+   *  value — the next `refetch()` will fill in fresh data. */
+  cancel: () => void;
+  /** Detach this subscriber from the cache. Idempotent. */
+  unsubscribe: () => void;
 }
 
 class QueryClient {
   private readonly entries = new Map<string, InternalEntry<unknown>>();
 
-  /**
-   * Internal: derive a stable string key from a QueryKey. JSON.stringify
-   * is the convention we use; keys are tuples of primitives in practice
-   * so the collisions are negligible.
-   */
   private keyOf(key: QueryKey): string {
     return JSON.stringify(key);
   }
@@ -62,21 +90,11 @@ class QueryClient {
     return entry?.state;
   }
 
-  /**
-   * Start a fetch if no in-flight request exists for the key. Returns
-   * a subscription handle — call .unsubscribe() to stop receiving
-   * state updates. The handle also exposes .refetch() to force a
-   * fresh fetch and .cancel() to abort the in-flight one.
-   */
   subscribe<T>(
     key: QueryKey,
     fetcher: Fetcher<T>,
-    options: { staleTimeMs?: number } = {}
-  ): {
-    unsubscribe: () => void;
-    refetch: () => void;
-    cancel: () => void;
-  } {
+    options: QueryOptions = {}
+  ): QueryHandle<T> {
     const stringKey = this.keyOf(key);
     let entry = this.entries.get(stringKey) as InternalEntry<T> | undefined;
     if (!entry) {
@@ -92,7 +110,14 @@ class QueryClient {
       entry.staleTimeMs = options.staleTimeMs ?? entry.staleTimeMs;
     }
 
-    const observer = (s: QueryState<T>): void => { /* no-op; calls go through state setter */ };
+    // Each call to subscribe adds its own observer so the page that
+    // owns this subscription gets a notification on every state change.
+    // The observer is the page's `bumpVersion` callback — when fired,
+    // the page re-renders, the next `build()` calls `getState()`, and
+    // the latest data appears.
+    const observer = (): void => {
+      if (options.onUpdate) options.onUpdate();
+    };
     entry.observers.add(observer);
 
     const startFetch = (force: boolean): void => {
@@ -146,12 +171,9 @@ class QueryClient {
       entry!.inflight = promise;
     };
 
-    // Eagerly start a fetch on first subscribe if the cache is empty.
     if (entry.state.data === undefined && !entry.inflight) {
       startFetch(false);
     } else {
-      // Stale-while-revalidate: if data is stale, kick a refetch in the
-      // background so the next subscribe gets fresh data without flicker.
       const stale = entry.state.updatedAt === null ||
         Date.now() - entry.state.updatedAt > entry.staleTimeMs;
       if (stale && !entry.inflight) {
@@ -159,26 +181,26 @@ class QueryClient {
       }
     }
 
+    let unsubscribed = false;
     return {
+      getState: (): QueryState<T> => {
+        const e = this.entries.get(stringKey) as InternalEntry<T> | undefined;
+        return e ? e.state : { data: undefined, error: null, isLoading: true, isRefetching: false, updatedAt: null };
+      },
+      refetch: (): void => { startFetch(true); },
+      cancel: (): void => { entry!.controller?.abort(); },
       unsubscribe: (): void => {
+        if (unsubscribed) return;
+        unsubscribed = true;
         entry!.observers.delete(observer);
-        // If no observers remain, cancel any in-flight request and drop
-        // the entry so a future subscribe re-fetches from scratch.
         if (entry!.observers.size === 0) {
           entry!.controller?.abort();
           this.entries.delete(stringKey);
         }
-      },
-      refetch: (): void => { startFetch(true); },
-      cancel: (): void => { entry!.controller?.abort(); }
+      }
     };
   }
 
-  /**
-   * Imperatively write data into the cache (used by mutations for
-   * optimistic updates and by WS event handlers for cache patches).
-   * Mirrors TQ's `queryClient.setQueryData(key, updater)`.
-   */
   setQueryData<T>(key: QueryKey, data: T | ((prev: T | undefined) => T)): void {
     const stringKey = this.keyOf(key);
     const entry = this.entries.get(stringKey) as InternalEntry<T> | undefined;
@@ -200,10 +222,7 @@ class QueryClient {
   }
 
   invalidate(key: QueryKey): void {
-    const stringKey = this.keyOf(key);
-    this.entries.delete(stringKey);
-    // Subscribers will re-subscribe on next read; the fetch fires on
-    // first observer attach.
+    this.entries.delete(this.keyOf(key));
   }
 
   clear(): void {
@@ -216,15 +235,12 @@ class QueryClient {
   private notify(stringKey: string): void {
     const entry = this.entries.get(stringKey);
     if (!entry) return;
-    // The observers themselves just call back through the subscribe handle.
-    // We notify by re-running them; the subscribe API keeps a single
-    // observer per call so this is cheap.
     for (const obs of entry.observers) {
-      // Cast: each observer was added with a matching T. The observer
-      // signature is intentionally a no-op — page components read state
-      // via `get()` and refresh manually when notified. We notify via a
-      // separate channel below.
-      void obs(entry.state);
+      try {
+        obs();
+      } catch (err) {
+        console.warn('[query] observer threw', err);
+      }
     }
   }
 }
@@ -232,37 +248,20 @@ class QueryClient {
 export const queryClient: QueryClient = new QueryClient();
 
 /**
- * Hook-shaped helper for components. Returns a `QueryState<T>` and a
- * `refetch` / `cancel` pair, and re-renders the page when state changes.
+ * `useQuery` — entry point for pages. Returns a `QueryHandle<T>` whose
+ * `getState()` reads the latest cache value on every call. Combine with
+ * a `@Local version: number` + `bumpVersion` callback on the page so
+ * the cache can trigger re-renders.
  *
- * Why a "hook-shaped helper" instead of a real @CustomHook? ArkUI's
- * `makeState` / `makeBuilder` aren't the right fit for a one-shot
- * subscription — instead we expose a `useQuery` function that pages
- * call inside `aboutToAppear` and call `.unsubscribe()` in
- * `aboutToDisappear`. Mirrors TQ's `useQuery` API surface in spirit.
+ * Pages must call this from `aboutToAppear` (NOT a field initializer)
+ * — the field initializer runs before `aboutToAppear` and would capture
+ * stale `this.issueId` / `this.workspaceId` values, kicking the fetch
+ * with an empty key.
  */
-export interface QueryHandle<T> {
-  state: QueryState<T>;
-  refetch: () => void;
-  cancel: () => void;
-}
-
 export function useQuery<T>(
   key: QueryKey,
   fetcher: Fetcher<T>,
-  options: { staleTimeMs?: number; enabled?: boolean } = {}
+  options: QueryOptions = {}
 ): QueryHandle<T> {
-  const handle = queryClient.subscribe(key, fetcher, options);
-  const state = queryClient.get<T>(key) ?? {
-    data: undefined,
-    error: null,
-    isLoading: true,
-    isRefetching: false,
-    updatedAt: null
-  };
-  return {
-    state,
-    refetch: handle.refetch,
-    cancel: handle.cancel
-  };
+  return queryClient.subscribe(key, fetcher, options);
 }

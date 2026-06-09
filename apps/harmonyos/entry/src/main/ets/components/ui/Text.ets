@@ -1,15 +1,15 @@
 import { THEME, ColorScheme, FONT_SIZE, FONT_WEIGHT } from '../../lib/theme';
 
-@Component
+@ComponentV2
 export struct MulticaText {
-  @Prop value: string = '';
-  @Prop scheme: ColorScheme = 'light';
-  @Prop size: 'xs' | 'sm' | 'base' | 'md' | 'lg' | 'xl' | '2xl' | '3xl' = 'base';
-  @Prop weight: 'normal' | 'medium' | 'semibold' | 'bold' = 'normal';
-  @Prop color: 'foreground' | 'mutedForeground' | 'destructive' | 'brand' | 'success' | 'warning' = 'foreground';
-  @Prop textAlign: 'start' | 'center' | 'end' = 'start';
-  @Prop maxLines: number = 0;
-  @Prop overflow: 'clip' | 'ellipsis' | 'visible' = 'clip';
+  @Param value: string = '';
+  @Param scheme: ColorScheme = 'light';
+  @Param size: 'xs' | 'sm' | 'base' | 'md' | 'lg' | 'xl' | '2xl' | '3xl' = 'base';
+  @Param weight: 'normal' | 'medium' | 'semibold' | 'bold' = 'normal';
+  @Param color: 'foreground' | 'mutedForeground' | 'destructive' | 'brand' | 'success' | 'warning' = 'foreground';
+  @Param textAlign: 'start' | 'center' | 'end' = 'start';
+  @Param maxLines: number = 0;
+  @Param overflow: 'clip' | 'ellipsis' | 'visible' = 'clip';
 
   build() {
     Text(this.value)

@@ -1,5 +1,5 @@
-import router from '@ohos.router';
-import { authStore, globalEvents } from '../data/auth';
+import { appNavigation } from '../data/navigation';
+import { globalEvents } from '../data/auth';
 import { workspaceStore } from '../data/workspace';
 import { wsClient } from '../realtime/ws-client';
 import { THEME, ColorScheme, SPACE } from '../lib/theme';
@@ -10,30 +10,19 @@ import { MyIssuesPage } from './MyIssuesPage';
 import { ChatPage } from './ChatPage';
 import { MorePage } from './MorePage';
 
-/**
- * WorkspaceLayout — primary shell once the user is authed. Owns the
- * bottom tab bar (Inbox / My Issues / Chat / More) and routes the
- * "workspace not loaded yet" state (e.g. cold launch before the
- * workspace list resolves) to a thin splash. The "no workspace"
- * state routes to SelectWorkspacePage, mirroring the iOS
- * (app)/select-workspace.tsx behavior.
- *
- * Mounts the WS client. Disconnect on unmount to avoid leaking the
- * socket when the user signs out from the More tab.
- */
 @Entry
-@Component
+@ComponentV2
 struct WorkspaceLayout {
-  @State activeTab: number = 0;
-  @State scheme: ColorScheme = 'light';
-  @State bootstrapping: boolean = true;
+  @Local activeTab: number = 0;
+  @Local scheme: ColorScheme = 'light';
+  @Local bootstrapping: boolean = true;
   private authUnsub?: () => void;
   private wsUnsub?: () => void;
 
   aboutToAppear(): void {
     this.scheme = this.detectScheme();
     this.authUnsub = globalEvents.on('auth:required', () => {
-      router.replaceUrl({ url: 'pages/LoginPage' });
+      appNavigation.replaceName('LoginPage');
     });
     this.wsUnsub = globalEvents.on('workspace:changed', () => {
       this.recheckWorkspace();
@@ -59,7 +48,7 @@ struct WorkspaceLayout {
     try {
       const list = await workspaceStore.fetchWorkspaces();
       if (list.length === 0) {
-        router.replaceUrl({ url: 'pages/SelectWorkspacePage' });
+        appNavigation.replaceName('SelectWorkspacePage');
         return;
       }
       this.bootstrapping = false;
@@ -71,52 +60,56 @@ struct WorkspaceLayout {
 
   private recheckWorkspace(): void {
     if (!workspaceStore.currentId) {
-      router.replaceUrl({ url: 'pages/SelectWorkspacePage' });
+      appNavigation.replaceName('SelectWorkspacePage');
     }
   }
 
   build() {
-    if (this.bootstrapping) {
-      Stack({ alignContent: Alignment.Center }) {
-        Column() {
-          Skeleton({ scheme: this.scheme, width: 200, height: 24, radius: 6 })
-          Skeleton({ scheme: this.scheme, width: 120, height: 16, radius: 4 })
-            .margin({ top: SPACE['2'] })
-        }
-      }
-      .width('100%')
-      .height('100%')
-      .backgroundColor(String(THEME[this.scheme].background))
-    } else {
-      Column() {
-        Stack() {
-          if (this.activeTab === 0) {
-            InboxPage();
-          } else if (this.activeTab === 1) {
-            MyIssuesPage();
-          } else if (this.activeTab === 2) {
-            ChatPage();
-          } else {
-            MorePage();
+    Navigation(appNavigation.stack) {
+      if (this.bootstrapping) {
+        Stack({ alignContent: Alignment.Center }) {
+          Column() {
+            Skeleton({ scheme: this.scheme, width: 200, height: 24, radius: 6 })
+            Skeleton({ scheme: this.scheme, width: 120, height: 16, radius: 4 })
+              .margin({ top: SPACE['2'] })
           }
         }
-        .layoutWeight(1)
         .width('100%')
+        .height('100%')
+        .backgroundColor(String(THEME[this.scheme].background))
+      } else {
+        Column() {
+          Stack() {
+            if (this.activeTab === 0) {
+              InboxPage();
+            } else if (this.activeTab === 1) {
+              MyIssuesPage();
+            } else if (this.activeTab === 2) {
+              ChatPage();
+            } else {
+              MorePage();
+            }
+          }
+          .layoutWeight(1)
+          .width('100%')
 
-        this.TabBar()
+          this.TabBar()
+        }
+        .width('100%')
+        .height('100%')
+        .backgroundColor(String(THEME[this.scheme].background))
       }
-      .width('100%')
-      .height('100%')
-      .backgroundColor(String(THEME[this.scheme].background))
     }
+    .mode(NavigationMode.Stack)
+    .hideTitleBar(true)
   }
 
   @Builder TabBar() {
     Row() {
-      this.TabButton(0, 'Inbox', '·')
-      this.TabButton(1, 'My Issues', '·')
-      this.TabButton(2, 'Chat', '·')
-      this.TabButton(3, 'More', '·')
+      this.TabButton(0, $r('app.string.nav_inbox'), $r('sys.symbol.tray_fill'))
+      this.TabButton(1, $r('app.string.nav_my_issues'), $r('sys.symbol.checkmark_square'))
+      this.TabButton(2, $r('app.string.nav_chat'), $r('sys.symbol.bubble_left_fill'))
+      this.TabButton(3, $r('app.string.nav_more'), $r('sys.symbol.line_3_horizontal'))
     }
     .width('100%')
     .height(56)
@@ -127,16 +120,13 @@ struct WorkspaceLayout {
     })
   }
 
-  @Builder TabButton(index: number, label: string, glyph: string) {
+  @Builder TabButton(index: number, label: Resource, glyph: Resource) {
     Column() {
+      SymbolGlyph(glyph)
+        .fontSize(20)
+        .fontColor([String(THEME[this.scheme][this.activeTab === index ? 'foreground' : 'mutedForeground'])])
       MulticaText({
-        value: glyph,
-        scheme: this.scheme,
-        size: 'lg',
-        color: this.activeTab === index ? 'foreground' : 'mutedForeground'
-      })
-      MulticaText({
-        value: label,
+        value: label as unknown as string,
         scheme: this.scheme,
         size: 'xs',
         color: this.activeTab === index ? 'foreground' : 'mutedForeground'

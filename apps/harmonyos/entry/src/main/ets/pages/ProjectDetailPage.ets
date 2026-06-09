@@ -1,5 +1,5 @@
-import router from '@ohos.router';
-import { useProjectDetailQuery } from '../queries/project';
+import { appNavigation } from '../data/navigation';
+import { useProjectDetailQuery, QueryHandle } from '../queries/project';
 import { useIssueListQuery } from '../queries/issue';
 import { THEME, ColorScheme, SPACE, RADIUS } from '../lib/theme';
 import { timeAgo } from '../lib/utils';
@@ -12,17 +12,16 @@ import { Avatar } from '../components/ui/Avatar';
 import { IssueRow } from '../components/issue/IssueRow';
 import { Skeleton } from '../components/ui/Skeleton';
 import { Card } from '../components/ui/Card';
+import { Project, ListIssuesResponse } from '../models/types';
 
 @Entry
-@Component
+@ComponentV2
 struct ProjectDetailPage {
-  @State scheme: ColorScheme = 'light';
-  @State projectId: string = '';
+  @Local scheme: ColorScheme = 'light';
+  @Local projectId: string = '';
 
   aboutToAppear(): void {
     this.scheme = this.detectScheme();
-    const params = router.getParams() as Record<string, string> | undefined;
-    this.projectId = params?.['id'] ?? '';
   }
 
   private detectScheme(): ColorScheme {
@@ -30,27 +29,31 @@ struct ProjectDetailPage {
   }
 
   build() {
-    Column() {
-      Header({
-        title: 'Project',
-        scheme: this.scheme,
-        left: this.BackButton()
-      })
-      if (this.projectId) {
-        this.Body()
-      } else {
-        MulticaText({
-          value: 'No project id provided',
+    Navigation(appNavigation.stack) {
+      Column() {
+        Header({
+          title: 'Project',
           scheme: this.scheme,
-          size: 'sm',
-          color: 'destructive'
+          left: this.BackButton()
         })
-          .padding(SPACE['4'])
+        if (this.projectId) {
+          this.Body()
+        } else {
+          MulticaText({
+            value: 'No project id provided',
+            scheme: this.scheme,
+            size: 'sm',
+            color: 'destructive'
+          })
+            .padding(SPACE['4'])
+        }
       }
+      .width('100%')
+      .height('100%')
+      .backgroundColor(String(THEME[this.scheme].background))
     }
-    .width('100%')
-    .height('100%')
-    .backgroundColor(String(THEME[this.scheme].background))
+    .mode(NavigationMode.Stack)
+    .hideTitleBar(true)
   }
 
   @Builder BackButton() {
@@ -58,7 +61,7 @@ struct ProjectDetailPage {
       glyph: '‹',
       scheme: this.scheme,
       accessibilityLabel: 'Back',
-      onTap: () => { router.back(); }
+      onTap: () => { appNavigation.pop(); }
     })
   }
 
@@ -67,20 +70,42 @@ struct ProjectDetailPage {
   }
 }
 
-@Component
+@ComponentV2
 struct ProjectDetailBody {
-  @Prop projectId: string = '';
-  @State scheme: ColorScheme = 'light';
-  private project = useProjectDetailQuery(this.projectId);
-  private issues = useIssueListQuery({ project_id: this.projectId });
+  @Param projectId: string = '';
+  @Param scheme: ColorScheme = 'light';
+  @Local version: number = 0;
+  private project: QueryHandle<Project> | null = null;
+  private issues: QueryHandle<ListIssuesResponse> | null = null;
+
+  aboutToAppear(): void {
+    this.project = useProjectDetailQuery(this.projectId, () => { this.version++; });
+    this.issues = useIssueListQuery({ project_id: this.projectId }, () => { this.version++; });
+  }
+
+  aboutToDisappear(): void {
+    this.project?.unsubscribe();
+    this.issues?.unsubscribe();
+  }
 
   build() {
+    if (!this.project || !this.issues) {
+      Column() {
+        Skeleton({ scheme: this.scheme, width: '90%', height: 28, radius: 6 })
+      }
+      .padding(SPACE['4'])
+      .width('100%')
+      .alignItems(HorizontalAlign.Start)
+      return;
+    }
+    const pState = this.project.getState();
+    const iState = this.issues.getState();
     Scroll() {
       Column() {
-        if (this.project.state.isLoading) {
+        if (pState.isLoading) {
           Skeleton({ scheme: this.scheme, width: '90%', height: 28, radius: 6 })
-        } else if (this.project.state.data) {
-          const p = this.project.state.data;
+        } else if (pState.data) {
+          const p = pState.data;
           Stack({ alignContent: Alignment.Center }) {
             MulticaText({
               value: p.identifier,
@@ -177,13 +202,13 @@ struct ProjectDetailBody {
           .width('100%')
           .padding({ left: SPACE['4'], right: SPACE['4'] })
 
-        if (this.issues.state.data?.issues) {
+        if (iState.data?.issues) {
           Column() {
-            ForEach(this.issues.state.data.issues, (issue) => {
+            ForEach(iState.data.issues, (issue) => {
               IssueRow({
                 issue: issue,
                 scheme: this.scheme,
-                onPress: () => { router.pushUrl({ url: 'pages/IssueDetailPage', params: { id: issue.id } }); }
+                onPress: () => { appNavigation.pushName('IssueDetailPage', { id: issue.id }); }
               })
             })
           }

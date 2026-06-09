@@ -1,4 +1,4 @@
-import router from '@ohos.router';
+import { appNavigation } from '../data/navigation';
 import { workspaceStore } from '../data/workspace';
 import { Workspace } from '../models/types';
 import { THEME, ColorScheme, SPACE, RADIUS } from '../lib/theme';
@@ -8,11 +8,11 @@ import { IconButton } from '../components/ui/IconButton';
 import { Skeleton } from '../components/ui/Skeleton';
 
 @Entry
-@Component
+@ComponentV2
 struct SwitchWorkspacePage {
-  @State scheme: ColorScheme = 'light';
-  @State workspaces: Workspace[] = [];
-  @State loading: boolean = true;
+  @Local scheme: ColorScheme = 'light';
+  @Local workspaces: Workspace[] = [];
+  @Local loading: boolean = true;
 
   aboutToAppear(): void {
     this.scheme = this.detectScheme();
@@ -35,65 +35,69 @@ struct SwitchWorkspacePage {
 
   private async pick(ws: Workspace): Promise<void> {
     await workspaceStore.setCurrent(ws.id, ws.slug);
-    router.replaceUrl({ url: 'pages/WorkspaceLayout' });
+    appNavigation.replaceName('WorkspaceLayout');
   }
 
   build() {
-    Column() {
-      Header({
-        title: 'Switch workspace',
-        scheme: this.scheme,
-        left: this.BackButton()
-      })
+    Navigation(appNavigation.stack) {
+      Column() {
+        Header({
+          title: 'Switch workspace',
+          scheme: this.scheme,
+          left: this.BackButton()
+        })
 
-      if (this.loading) {
-        Column() {
-          ForEach([1, 2, 3], () => {
-            Skeleton({ scheme: this.scheme, width: '90%', height: 56, radius: 8 })
-              .margin({ top: SPACE['3'] })
-          })
-        }
-        .padding(SPACE['4'])
-        .width('100%')
-      } else {
-        List({ space: 0 }) {
-          ForEach(this.workspaces, (ws: Workspace) => {
-            ListItem() {
-              Row() {
-                MulticaText({
-                  value: ws.name,
-                  scheme: this.scheme,
-                  size: 'base',
-                  weight: 'medium',
-                  color: 'foreground'
-                })
-                if (ws.id === workspaceStore.currentId) {
-                  Blank()
+        if (this.loading) {
+          Column() {
+            ForEach([1, 2, 3], () => {
+              Skeleton({ scheme: this.scheme, width: '90%', height: 56, radius: 8 })
+                .margin({ top: SPACE['3'] })
+            })
+          }
+          .padding(SPACE['4'])
+          .width('100%')
+        } else {
+          List({ space: 0 }) {
+            ForEach(this.workspaces, (ws: Workspace) => {
+              ListItem() {
+                Row() {
                   MulticaText({
-                    value: '✓',
+                    value: ws.name,
                     scheme: this.scheme,
                     size: 'base',
                     weight: 'medium',
-                    color: 'brand'
+                    color: 'foreground'
                   })
+                  if (ws.id === workspaceStore.currentId) {
+                    Blank()
+                    MulticaText({
+                      value: '✓',
+                      scheme: this.scheme,
+                      size: 'base',
+                      weight: 'medium',
+                      color: 'brand'
+                    })
+                  }
                 }
+                .width('100%')
+                .padding(SPACE['4'])
+                .backgroundColor(String(THEME[this.scheme].card))
+                .borderRadius(RADIUS.md)
+                .margin({ top: SPACE['2'], left: SPACE['4'], right: SPACE['4'] })
+                .onClick(() => { void this.pick(ws); })
               }
-              .width('100%')
-              .padding(SPACE['4'])
-              .backgroundColor(String(THEME[this.scheme].card))
-              .borderRadius(RADIUS.md)
-              .margin({ top: SPACE['2'], left: SPACE['4'], right: SPACE['4'] })
-              .onClick(() => { void this.pick(ws); })
-            }
-          })
+            })
+          }
+          .layoutWeight(1)
+          .width('100%')
         }
-        .layoutWeight(1)
-        .width('100%')
       }
+      .width('100%')
+      .height('100%')
+      .backgroundColor(String(THEME[this.scheme].background))
     }
-    .width('100%')
-    .height('100%')
-    .backgroundColor(String(THEME[this.scheme].background))
+    .mode(NavigationMode.Stack)
+    .hideTitleBar(true)
   }
 
   @Builder BackButton() {
@@ -101,7 +105,7 @@ struct SwitchWorkspacePage {
       glyph: '‹',
       scheme: this.scheme,
       accessibilityLabel: 'Back',
-      onTap: () => { router.back(); }
+      onTap: () => { appNavigation.pop(); }
     })
   }
 }

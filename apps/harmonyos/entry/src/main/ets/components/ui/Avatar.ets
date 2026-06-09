@@ -1,12 +1,12 @@
 import { THEME, ColorScheme, RADIUS } from '../../lib/theme';
 import { MulticaText } from './Text';
 
-@Component
+@ComponentV2
 export struct Avatar {
-  @Prop name: string = '';
-  @Prop url: string = '';
-  @Prop size: number = 36;
-  @Prop scheme: ColorScheme = 'light';
+  @Param name: string = '';
+  @Param url: string = '';
+  @Param size: number = 36;
+  @Param scheme: ColorScheme = 'light';
 
   build() {
     Stack({ alignContent: Alignment.Center }) {
@@ -42,9 +42,6 @@ export struct Avatar {
   }
 
   private fallbackColor(name: string): string {
-    // Stable color from name hash. We use a small palette of muted
-    // hues that read as "neutral" — never a saturated brand color, to
-    // avoid clashing with the brand/agent treatment elsewhere.
     const palette = ['#71717A', '#A1A1AA', '#52525B', '#3F3F46', '#737373', '#78716C'];
     let h = 0;
     for (let i = 0; i < name.length; i++) {

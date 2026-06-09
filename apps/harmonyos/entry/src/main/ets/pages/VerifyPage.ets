@@ -1,21 +1,19 @@
-import router from '@ohos.router';
+import { appNavigation } from '../data/navigation';
 import { authStore } from '../data/auth';
 import { THEME, ColorScheme, SPACE, RADIUS } from '../lib/theme';
 import { MulticaText } from '../components/ui/Text';
 import { MulticaButton } from '../components/ui/Button';
 
 @Entry
-@Component
+@ComponentV2
 struct VerifyPage {
-  @State code: string = '';
-  @State loading: boolean = false;
-  @State errorMessage: string = '';
-  @State scheme: ColorScheme = 'light';
-  private email: string = '';
+  @Local code: string = '';
+  @Local loading: boolean = false;
+  @Local errorMessage: string = '';
+  @Local scheme: ColorScheme = 'light';
+  @Local email: string = '';
 
   aboutToAppear(): void {
-    const params = router.getParams() as Record<string, string> | undefined;
-    this.email = params?.['email'] ?? '';
     this.scheme = this.detectScheme();
   }
 
@@ -32,7 +30,7 @@ struct VerifyPage {
     this.errorMessage = '';
     try {
       await authStore.verifyOtp(this.email, this.code);
-      router.replaceUrl({ url: 'pages/WorkspaceLayout' });
+      appNavigation.replaceName('WorkspaceLayout');
     } catch (err) {
       this.errorMessage = err instanceof Error ? err.message : 'Verification failed';
     } finally {
@@ -41,75 +39,79 @@ struct VerifyPage {
   }
 
   build() {
-    Stack({ alignContent: Alignment.Center }) {
-      Column() {
-        MulticaText({
-          value: 'Enter verification code',
-          scheme: this.scheme,
-          size: 'xl',
-          weight: 'bold',
-          color: 'foreground'
-        })
-        MulticaText({
-          value: `Sent to ${this.email}`,
-          scheme: this.scheme,
-          size: 'sm',
-          color: 'mutedForeground'
-        })
-          .margin({ top: SPACE['2'] })
-
-        TextInput({ placeholder: '000000', text: this.code })
-          .placeholderColor(String(THEME[this.scheme].mutedForeground))
-          .fontColor(String(THEME[this.scheme].foreground))
-          .backgroundColor(String(THEME[this.scheme].card))
-          .borderRadius(RADIUS.md)
-          .padding(SPACE['3'])
-          .width('100%')
-          .margin({ top: SPACE['8'] })
-          .type(InputType.Number)
-          .maxLength(6)
-          .fontSize(24)
-          .textAlign(TextAlign.Center)
-          .onChange((value: string) => {
-            this.code = value;
-            this.errorMessage = '';
-          })
-
-        if (this.errorMessage) {
+    Navigation(appNavigation.stack) {
+      Stack({ alignContent: Alignment.Center }) {
+        Column() {
           MulticaText({
-            value: this.errorMessage,
+            value: 'Enter verification code',
+            scheme: this.scheme,
+            size: 'xl',
+            weight: 'bold',
+            color: 'foreground'
+          })
+          MulticaText({
+            value: `Sent to ${this.email}`,
             scheme: this.scheme,
             size: 'sm',
-            color: 'destructive'
+            color: 'mutedForeground'
+          })
+            .margin({ top: SPACE['2'] })
+
+          TextInput({ placeholder: '000000', text: this.code })
+            .placeholderColor(String(THEME[this.scheme].mutedForeground))
+            .fontColor(String(THEME[this.scheme].foreground))
+            .backgroundColor(String(THEME[this.scheme].card))
+            .borderRadius(RADIUS.md)
+            .padding(SPACE['3'])
+            .width('100%')
+            .margin({ top: SPACE['8'] })
+            .type(InputType.Number)
+            .maxLength(6)
+            .fontSize(24)
+            .textAlign(TextAlign.Center)
+            .onChange((value: string) => {
+              this.code = value;
+              this.errorMessage = '';
+            })
+
+          if (this.errorMessage) {
+            MulticaText({
+              value: this.errorMessage,
+              scheme: this.scheme,
+              size: 'sm',
+              color: 'destructive'
+            })
+              .margin({ top: SPACE['2'] })
+          }
+
+          MulticaButton({
+            label: this.loading ? 'Verifying…' : 'Verify',
+            scheme: this.scheme,
+            variant: 'primary',
+            fullWidth: true,
+            disabled: this.loading,
+            onTap: () => { void this.verify(); }
+          })
+            .margin({ top: SPACE['4'] })
+
+          MulticaButton({
+            label: 'Back',
+            scheme: this.scheme,
+            variant: 'ghost',
+            fullWidth: true,
+            onTap: () => { appNavigation.pop(); }
           })
             .margin({ top: SPACE['2'] })
         }
-
-        MulticaButton({
-          label: this.loading ? 'Verifying…' : 'Verify',
-          scheme: this.scheme,
-          variant: 'primary',
-          fullWidth: true,
-          disabled: this.loading,
-          onTap: () => { void this.verify(); }
-        })
-          .margin({ top: SPACE['4'] })
-
-        MulticaButton({
-          label: 'Back',
-          scheme: this.scheme,
-          variant: 'ghost',
-          fullWidth: true,
-          onTap: () => { router.back(); }
-        })
-          .margin({ top: SPACE['2'] })
+        .width('100%')
+        .padding(SPACE['6'])
+        .constraintSize({ maxWidth: 480 })
       }
       .width('100%')
-      .padding(SPACE['6'])
-      .constraintSize({ maxWidth: 480 })
+      .height('100%')
+      .backgroundColor(String(THEME[this.scheme].background))
     }
-    .width('100%')
-    .height('100%')
-    .backgroundColor(String(THEME[this.scheme].background))
+    .mode(NavigationMode.Stack)
+    .hideTitleBar(true)
   }
 }

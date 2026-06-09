@@ -1,17 +1,17 @@
 import { InboxItem } from '../../models/types';
-import { ColorScheme, THEME, SPACE, RADIUS } from '../../lib/theme';
+import { ColorScheme, THEME, SPACE } from '../../lib/theme';
 import { timeAgo } from '../../lib/utils';
 import { MulticaText } from '../ui/Text';
 import { Avatar } from '../ui/Avatar';
 import { StatusIcon } from '../ui/StatusIcon';
 
-@Component
+@ComponentV2
 export struct InboxRow {
-  @Prop item: InboxItem = { id: '', type: 'mention', read: false, archived: false, workspace_id: '', created_at: '', updated_at: '' };
-  @Prop scheme: ColorScheme = 'light';
-  @Prop issueIdentifier: string = '';
-  @Prop issueTitle: string = '';
-  onPress: () => void = () => {};
+  @Param item: InboxItem = { id: '', type: 'mention', read: false, archived: false, workspace_id: '', created_at: '', updated_at: '' };
+  @Param scheme: ColorScheme = 'light';
+  @Param issueIdentifier: string = '';
+  @Param issueTitle: string = '';
+  @Event onPress: () => void = (): void => {};
 
   build() {
     Row() {

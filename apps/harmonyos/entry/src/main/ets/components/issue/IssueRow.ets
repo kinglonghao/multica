@@ -5,11 +5,11 @@ import { MulticaText } from '../ui/Text';
 import { StatusIcon } from '../ui/StatusIcon';
 import { PriorityIcon } from '../ui/PriorityIcon';
 
-@Component
+@ComponentV2
 export struct IssueRow {
-  @Prop issue: Issue = { id: '', number: 0, identifier: '', title: '', status: 'todo', priority: 'no_priority', workspace_id: '', created_at: '', updated_at: '' };
-  @Prop scheme: ColorScheme = 'light';
-  onPress: () => void = () => {};
+  @Param issue: Issue = { id: '', number: 0, identifier: '', title: '', status: 'todo', priority: 'no_priority', workspace_id: '', created_at: '', updated_at: '' };
+  @Param scheme: ColorScheme = 'light';
+  @Event onPress: () => void = (): void => {};
 
   build() {
     Row() {

@@ -4,11 +4,11 @@ import { projectStatusLabel, projectPriorityLabel } from '../../lib/project-stat
 import { MulticaText } from '../ui/Text';
 import { ProjectStatusIcon, ProjectPriorityIcon } from '../ui/ProjectStatusIcon';
 
-@Component
+@ComponentV2
 export struct ProjectRow {
-  @Prop project: Project = { id: '', name: '', identifier: '', status: 'planned', priority: 'no_priority', workspace_id: '', created_at: '', updated_at: '' };
-  @Prop scheme: ColorScheme = 'light';
-  onPress: () => void = () => {};
+  @Param project: Project = { id: '', name: '', identifier: '', status: 'planned', priority: 'no_priority', workspace_id: '', created_at: '', updated_at: '' };
+  @Param scheme: ColorScheme = 'light';
+  @Event onPress: () => void = (): void => {};
 
   build() {
     Row() {

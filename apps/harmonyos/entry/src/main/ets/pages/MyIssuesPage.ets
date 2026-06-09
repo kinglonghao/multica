@@ -1,21 +1,26 @@
-import router from '@ohos.router';
-import { useIssueListQuery } from '../queries/issue';
-import { authStore } from '../data/auth';
+import { appNavigation } from '../data/navigation';
+import { useIssueListQuery, QueryHandle } from '../queries/issue';
 import { THEME, ColorScheme, SPACE } from '../lib/theme';
 import { timeAgo } from '../lib/utils';
 import { MulticaText } from '../components/ui/Text';
 import { Header } from '../components/ui/Header';
 import { Skeleton } from '../components/ui/Skeleton';
 import { IssueRow } from '../components/issue/IssueRow';
+import { ListIssuesResponse } from '../models/types';
 
-@Component
+@ComponentV2
 export struct MyIssuesPage {
-  @State scheme: ColorScheme = 'light';
-  @State refreshing: boolean = false;
-  private query = useIssueListQuery({ status: ['todo', 'in_progress', 'in_review'] });
+  @Local scheme: ColorScheme = 'light';
+  @Local version: number = 0;
+  private query: QueryHandle<ListIssuesResponse> | null = null;
 
   aboutToAppear(): void {
     this.scheme = this.detectScheme();
+    this.query = useIssueListQuery({ status: ['todo', 'in_progress', 'in_review'] }, () => { this.version++; });
+  }
+
+  aboutToDisappear(): void {
+    this.query?.unsubscribe();
   }
 
   private detectScheme(): ColorScheme {
@@ -26,7 +31,11 @@ export struct MyIssuesPage {
     Column() {
       Header({ title: 'My Issues', scheme: this.scheme })
 
-      if (this.query.state.isLoading) {
+      if (!this.query) {
+        return;
+      }
+      const state = this.query.getState();
+      if (state.isLoading) {
         Column() {
           ForEach([1, 2, 3, 4, 5], () => {
             Row() {
@@ -35,16 +44,16 @@ export struct MyIssuesPage {
             .padding({ left: SPACE['4'], right: SPACE['4'], top: SPACE['3'], bottom: SPACE['3'] })
           })
         }
-      } else if (this.query.state.error) {
+      } else if (state.error) {
         MulticaText({
-          value: `Failed to load issues: ${this.query.state.error!.message}`,
+          value: `Failed to load issues: ${state.error!.message}`,
           scheme: this.scheme,
           size: 'sm',
           color: 'destructive'
         })
           .padding(SPACE['4'])
       } else {
-        const issues = this.query.state.data?.issues ?? [];
+        const issues = state.data?.issues ?? [];
         if (issues.length === 0) {
           Stack({ alignContent: Alignment.Center }) {
             MulticaText({
@@ -64,7 +73,7 @@ export struct MyIssuesPage {
                 IssueRow({
                   issue: issue,
                   scheme: this.scheme,
-                  onPress: () => { router.pushUrl({ url: 'pages/IssueDetailPage', params: { id: issue.id } }); }
+                  onPress: () => { appNavigation.pushName('IssueDetailPage', { id: issue.id }); }
                 })
               }
               .divider({ strokeWidth: 1, color: String(THEME[this.scheme].border) })
@@ -89,7 +98,7 @@ export struct MyIssuesPage {
       .backgroundColor(String(THEME[this.scheme].brand))
       .justifyContent(FlexAlign.Center)
       .alignItems(HorizontalAlign.Center)
-      .onClick(() => { router.pushUrl({ url: 'pages/NewIssuePage' }); })
+      .onClick(() => { appNavigation.pushName('NewIssuePage'); })
     }
     .width('100%')
     .height('100%')

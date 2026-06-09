@@ -1,11 +1,11 @@
 import { THEME, ColorScheme, RADIUS } from '../../lib/theme';
 
-@Component
+@ComponentV2
 export struct Skeleton {
-  @Prop scheme: ColorScheme = 'light';
-  @Prop width: string | number = '100%';
-  @Prop height: number = 16;
-  @Prop radius: number = RADIUS.DEFAULT;
+  @Param scheme: ColorScheme = 'light';
+  @Param width: string | number = '100%';
+  @Param height: number = 16;
+  @Param radius: number = RADIUS.DEFAULT;
 
   build() {
     Stack()

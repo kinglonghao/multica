@@ -1,11 +1,11 @@
 import { THEME, ColorScheme, RADIUS, SPACE } from '../../lib/theme';
 
-@Component
+@ComponentV2
 export struct Card {
-  @Prop scheme: ColorScheme = 'light';
+  @Param scheme: ColorScheme = 'light';
   @BuilderParam content?: CustomBuilder;
-  @Prop padding: number = SPACE['3'];
-  @Prop gap: number = SPACE['2'];
+  @Param padding: number = SPACE['3'];
+  @Param gap: number = SPACE['2'];
 
   build() {
     Column() {

@@ -1,7 +1,7 @@
-import router from '@ohos.router';
+import { appNavigation } from '../data/navigation';
 import { useInboxQuery } from '../queries/inbox';
 import { api } from '../data/api';
-import { queryClient } from '../queries/cache';
+import { queryClient, QueryHandle } from '../queries/cache';
 import { workspaceStore } from '../data/workspace';
 import { deduplicateInboxItems } from '../lib/inbox-display';
 import { InboxItem, Issue } from '../models/types';
@@ -12,24 +12,20 @@ import { Header } from '../components/ui/Header';
 import { IconButton } from '../components/ui/IconButton';
 import { InboxRow } from '../components/inbox/InboxRow';
 
-/**
- * Inbox tab. Mirrors the iOS inbox.tsx — same dedup, same load+empty
- * states, same tap-to-issue behavior. The big difference is that
- * HarmonyOS doesn't have an `Alert.alert` equivalent, so the trailing
- * action menu lives as a separate page (`SwitchWorkspacePage`-style)
- * reachable from the More tab. Trailing actions (mark all read, archive
- * all, etc.) are wired up as plain buttons here, not an action sheet.
- */
-@Component
+@ComponentV2
 export struct InboxPage {
-  @State scheme: ColorScheme = 'light';
-  @State showActions: boolean = false;
-  @State dataVersion: number = 0; // bumped to force re-render when cache mutates
-  private query = useInboxQuery();
-  private issueCache = new Map<string, Issue>();
+  @Local scheme: ColorScheme = 'light';
+  @Local version: number = 0;
+  private query: QueryHandle<InboxItem[]> | null = null;
+  private issueCache: Map<string, Issue> = new Map();
 
   aboutToAppear(): void {
     this.scheme = this.detectScheme();
+    this.query = useInboxQuery(() => { this.version++; });
+  }
+
+  aboutToDisappear(): void {
+    this.query?.unsubscribe();
   }
 
   private detectScheme(): ColorScheme {
@@ -44,12 +40,19 @@ export struct InboxPage {
         right: this.ActionsRow()
       })
 
-      if (this.query.state.isLoading) {
+      if (!this.query) {
+        // Should not happen — aboutToAppear runs before build. Render an
+        // empty state defensively in case ArkUI re-orders in some future
+        // version.
+        return this.EmptyState();
+      }
+      const state = this.query.getState();
+      if (state.isLoading) {
         this.LoadingState()
-      } else if (this.query.state.error) {
-        this.ErrorState(this.query.state.error!.message)
+      } else if (state.error) {
+        this.ErrorState(state.error!.message)
       } else {
-        const items = deduplicateInboxItems(this.query.state.data ?? []);
+        const items = deduplicateInboxItems(state.data ?? []);
         if (items.length === 0) {
           this.EmptyState()
         } else {
@@ -68,7 +71,7 @@ export struct InboxPage {
         glyph: '⋯',
         scheme: this.scheme,
         accessibilityLabel: 'Inbox actions',
-        onTap: () => { this.showActions = !this.showActions; }
+        onTap: () => { void this.archiveAllRead(); }
       })
     }
   }
@@ -151,9 +154,6 @@ export struct InboxPage {
 
   private onPressItem(item: InboxItem): void {
     if (!item.read) {
-      // Optimistic read flip. We patch the cache synchronously so the
-      // row restyles before the row source view is snapshotted for the
-      // push transition (mirrors iOS useMarkInboxRead.onMutate).
       queryClient.setQueryData(['inbox', workspaceStore.currentId], (prev: InboxItem[] | undefined) => {
         if (!prev) return prev;
         return prev.map(i => i.id === item.id ? { ...i, read: true } : i);
@@ -162,8 +162,20 @@ export struct InboxPage {
         console.warn('[inbox] mark read failed', err);
       });
     }
-    if (item.issue_id && workspaceStore.currentSlug) {
-      router.pushUrl({ url: 'pages/IssueDetailPage', params: { id: item.issue_id } });
+    if (item.issue_id) {
+      appNavigation.pushName('IssueDetailPage', { id: item.issue_id });
+    }
+  }
+
+  private async archiveAllRead(): Promise<void> {
+    queryClient.setQueryData(['inbox', workspaceStore.currentId], (prev: InboxItem[] | undefined) => {
+      if (!prev) return prev;
+      return prev.map(i => i.read ? { ...i, archived: true } : i);
+    });
+    try {
+      await api.archiveAllReadInbox();
+    } finally {
+      queryClient.invalidate(['inbox', workspaceStore.currentId]);
     }
   }
 }

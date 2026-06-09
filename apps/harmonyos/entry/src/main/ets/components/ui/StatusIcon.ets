@@ -1,6 +1,6 @@
 import { IssueStatus } from '../../models/types';
 import { ColorScheme } from '../../lib/theme';
-import { statusColor, statusLabel } from '../../lib/issue-status';
+import { statusColor } from '../../lib/issue-status';
 import { MulticaText } from './Text';
 
 /**
@@ -9,11 +9,11 @@ import { MulticaText } from './Text';
  * the status key (B/T/I/R/D/C) so the icon is self-describing even
  * at small sizes.
  */
-@Component
+@ComponentV2
 export struct StatusIcon {
-  @Prop status: IssueStatus | string = 'backlog';
-  @Prop scheme: ColorScheme = 'light';
-  @Prop size: number = 16;
+  @Param status: IssueStatus | string = 'backlog';
+  @Param scheme: ColorScheme = 'light';
+  @Param size: number = 16;
 
   build() {
     Stack({ alignContent: Alignment.Center }) {

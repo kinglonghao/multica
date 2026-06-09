@@ -1,15 +1,15 @@
 import { THEME, ColorScheme, RADIUS, SPACE } from '../../lib/theme';
 import { MulticaText } from './Text';
 
-@Component
+@ComponentV2
 export struct MulticaButton {
-  @Prop label: string = '';
-  @Prop scheme: ColorScheme = 'light';
-  @Prop variant: 'primary' | 'secondary' | 'outline' | 'destructive' | 'ghost' = 'primary';
-  @Prop size: 'sm' | 'md' | 'lg' = 'md';
-  @Prop disabled: boolean = false;
-  @Prop fullWidth: boolean = false;
-  onTap: () => void = () => {};
+  @Param label: string = '';
+  @Param scheme: ColorScheme = 'light';
+  @Param variant: 'primary' | 'secondary' | 'outline' | 'destructive' | 'ghost' = 'primary';
+  @Param size: 'sm' | 'md' | 'lg' = 'md';
+  @Param disabled: boolean = false;
+  @Param fullWidth: boolean = false;
+  @Event onTap: () => void = (): void => {};
 
   build() {
     Row() {

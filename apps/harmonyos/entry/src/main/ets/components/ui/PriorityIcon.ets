@@ -3,11 +3,11 @@ import { ColorScheme } from '../../lib/theme';
 import { priorityColor } from '../../lib/issue-status';
 import { MulticaText } from './Text';
 
-@Component
+@ComponentV2
 export struct PriorityIcon {
-  @Prop priority: IssuePriority | string = 'no_priority';
-  @Prop scheme: ColorScheme = 'light';
-  @Prop size: number = 16;
+  @Param priority: IssuePriority | string = 'no_priority';
+  @Param scheme: ColorScheme = 'light';
+  @Param size: number = 16;
 
   build() {
     Stack({ alignContent: Alignment.Center }) {

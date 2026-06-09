@@ -1,13 +1,13 @@
-import { THEME, ColorScheme, SPACE, RADIUS } from '../../lib/theme';
+import { THEME, ColorScheme, RADIUS } from '../../lib/theme';
 import { MulticaText } from './Text';
 
-@Component
+@ComponentV2
 export struct IconButton {
-  @Prop glyph: string = '·';
-  @Prop scheme: ColorScheme = 'light';
-  @Prop size: number = 36;
-  @Prop accessibilityLabel: string = '';
-  onTap: () => void = () => {};
+  @Param glyph: string = '·';
+  @Param scheme: ColorScheme = 'light';
+  @Param size: number = 36;
+  @Param accessibilityLabel: string = '';
+  @Event onTap: () => void = (): void => {};
 
   build() {
     Stack({ alignContent: Alignment.Center }) {
