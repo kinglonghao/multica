@@ -45,7 +45,10 @@ export struct MorePage {
       wsClient.disconnect();
       await workspaceStore.clear();
       await authStore.logout();
-      appNavigation.replaceName('LoginPage');
+      // Same pattern as Bug 3 fix — clear to root, then push
+      // LoginPage on top so the unauthed state has a visible UI.
+      appNavigation.clearStack();
+      appNavigation.pushName('LoginPage');
     } catch (err) {
       this.logoutError = err instanceof Error ? err.message : 'Sign-out failed — please try again';
     }

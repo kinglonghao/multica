@@ -37,7 +37,11 @@ export struct VerifyPage {
     this.errorMessage = '';
     try {
       await authStore.verifyOtp(this.email, this.code);
-      appNavigation.replaceName('WorkspaceLayout');
+      // Bug 3 fix: clear the destination stack and let the root
+      // WorkspaceLayout re-render with the now-authed state. Using
+      // replaceName('WorkspaceLayout') was a no-op because
+      // WorkspaceLayout isn't in the destination builder.
+      appNavigation.clearStack();
     } catch (err) {
       this.errorMessage = err instanceof Error ? err.message : 'Verification failed';
     } finally {

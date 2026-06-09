@@ -1,5 +1,7 @@
 import { appNavigation } from '../data/navigation';
 import { api } from '../data/api';
+import { queryClient } from '../queries/cache';
+import { workspaceStore } from '../data/workspace';
 import { CreateIssueRequest, IssueStatus, IssuePriority } from '../models/types';
 import { THEME, ColorScheme, SPACE, RADIUS } from '../lib/theme';
 import { statusLabel, priorityLabel } from '../lib/issue-status';
@@ -43,12 +45,33 @@ export struct NewIssuePage {
         priority: this.priority
       };
       const issue = await api.createIssue(req);
-      appNavigation.replaceName('IssueDetailPage', { id: issue.id });
+      // Bug 8 fix: invalidate every issue-list query key so the
+      // newly-created issue shows up in MyIssuesPage / search /
+      // project lists. The cache module exposes a wildcard-free
+      // invalidate — we walk the registered keys for the current
+      // workspace and drop every key whose first segment is
+      // 'issues'. The next subscriber refetches from /api/issues
+      // and picks up the new row.
+      this.invalidateIssueLists();
+      appNavigation.pushName('IssueDetailPage', { id: issue.id });
     } catch (err) {
       this.errorMessage = err instanceof Error ? err.message : 'Failed to create issue';
     } finally {
       this.saving = false;
     }
+  }
+
+  /**
+   * Invalidate every list-shaped issue cache for the current
+   * workspace. We can't use a single `queryClient.invalidate(['issues', wsId])`
+   * call because each list has a different params subkey; the
+   * concrete prefix is shared, so we drop all entries that start
+   * with that prefix. The cache is not enumerable from the
+   * outside, so the simplest fix is to delegate to a small
+   * `invalidatePrefix` helper on the cache.
+   */
+  private invalidateIssueLists(): void {
+    queryClient.invalidatePrefix(['issues', workspaceStore.currentId]);
   }
 
   build() {
@@ -106,8 +129,8 @@ export struct NewIssuePage {
               this.description = value;
             })
 
-          this.PickerRow('Status', statusLabel(this.status))
-          this.PickerRow('Priority', priorityLabel(this.priority))
+          this.PickerRow('status', 'Status', statusLabel(this.status))
+          this.PickerRow('priority', 'Priority', priorityLabel(this.priority))
 
           if (this.errorMessage) {
             MulticaText({
@@ -130,7 +153,7 @@ export struct NewIssuePage {
     .backgroundColor(String(THEME[this.scheme].background))
   }
 
-  @Builder PickerRow(label: string, value: string) {
+  @Builder PickerRow(kind: 'status' | 'priority', label: string, value: string) {
     Row() {
       MulticaText({
         value: label,
@@ -159,7 +182,11 @@ export struct NewIssuePage {
     .borderRadius(RADIUS.md)
     .margin({ top: SPACE['3'] })
     .onClick(() => {
-      if (label === 'Status') {
+      // Bug 10 fix: dispatch on the typed `kind` param, not the
+      // human-readable label. The label is a future i18n concern;
+      // a string compare would silently break under a non-English
+      // build. The `kind` union is compile-time fixed.
+      if (kind === 'status') {
         this.cycleStatus();
       } else {
         this.cyclePriority();

@@ -5,6 +5,7 @@ import { api } from '../data/api';
 import { queryClient } from '../queries/cache';
 import { workspaceStore } from '../data/workspace';
 import { deduplicateInboxItems } from '../lib/inbox-display';
+import { markInboxRead } from '../mutations/inbox';
 import { InboxItem, Issue } from '../models/types';
 import { THEME, ColorScheme, SPACE } from '../lib/theme';
 import { MulticaText } from '../components/ui/Text';
@@ -19,6 +20,12 @@ export struct InboxPage {
   @Local version: number = 0;
   @Local issueCache: Map<string, Issue> = new Map();
   private query: QueryHandle<InboxItem[]> | null = null;
+  // Bug 9 fix: hydrateIssueCache can fire from BOTH aboutToAppear
+  // and the onUpdate callback. Without this Set, two concurrent
+  // invocations both pass the `this.issueCache.has(id)` check
+  // (because neither has written yet) and double-fetch the same
+  // issue. The Set tracks IDs whose fetch is in flight.
+  private hydrationInFlight: Set<string> = new Set();
 
   aboutToAppear(): void {
     this.scheme = this.detectScheme();
@@ -62,8 +69,10 @@ export struct InboxPage {
     for (const item of items) {
       if (!item.issue_id) continue;
       if (this.issueCache.has(item.issue_id)) continue;
+      if (this.hydrationInFlight.has(item.issue_id)) continue;
       if (seen.has(item.issue_id)) continue;
       seen.add(item.issue_id);
+      this.hydrationInFlight.add(item.issue_id);
       try {
         const issue = await api.getIssue(item.issue_id);
         // Build a new map (immutable) so the page re-renders.
@@ -73,6 +82,8 @@ export struct InboxPage {
         this.version++;
       } catch (err) {
         console.warn('[inbox] hydrate issue failed', err);
+      } finally {
+        this.hydrationInFlight.delete(item.issue_id);
       }
     }
   }
@@ -196,13 +207,14 @@ export struct InboxPage {
 
   private onPressItem(item: InboxItem): void {
     if (!item.read) {
-      queryClient.setQueryData(['inbox', workspaceStore.currentId], (prev: InboxItem[] | undefined) => {
-        if (!prev) return prev;
-        return prev.map(i => i.id === item.id ? { ...i, read: true } : i);
-      });
-      api.markInboxRead(item.id).catch((err: Error) => {
-        console.warn('[inbox] mark read failed', err);
-      });
+      // Bug 7 fix: route through the mutation module, not the raw
+      // API. The mutation does the optimistic patch + server call
+      // + cache invalidate. Calling api.markInboxRead() directly
+      // skipped the invalidate, so the prior server-truth could
+      // drift on a future refetch (and the row would flip back to
+      // "unread" if the server had a different state than our
+      // optimistic patch).
+      void markInboxRead(item.id);
     }
     if (item.issue_id) {
       appNavigation.pushName('IssueDetailPage', { id: item.issue_id });

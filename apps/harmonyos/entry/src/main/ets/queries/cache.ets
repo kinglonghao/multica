@@ -261,6 +261,23 @@ class QueryClient {
     this.entries.delete(this.keyOf(key));
   }
 
+  /**
+   * Drop every cache entry whose serialized key STARTS WITH the
+   * given prefix. Used by mutations that want to invalidate
+   * "every list-shaped query for the current workspace" without
+   * knowing the exact per-list subkey — the new-issue flow
+   * invalidates ['issues', wsId, ...] for every variant of
+   * params the lists may have been opened with.
+   */
+  invalidatePrefix(prefix: QueryKey): void {
+    const prefixStr = this.keyOf(prefix);
+    for (const key of Array.from(this.entries.keys())) {
+      if (key.startsWith(prefixStr + '|') || key === prefixStr) {
+        this.entries.delete(key);
+      }
+    }
+  }
+
   clear(): void {
     for (const entry of this.entries.values()) {
       entry.controller?.abort();

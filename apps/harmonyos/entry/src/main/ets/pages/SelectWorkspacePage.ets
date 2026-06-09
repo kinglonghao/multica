@@ -34,7 +34,10 @@ export struct SelectWorkspacePage {
 
   private async pick(ws: Workspace): Promise<void> {
     await workspaceStore.setCurrent(ws.id, ws.slug);
-    appNavigation.replaceName('WorkspaceLayout');
+    // Bug 3 fix: clear the destination stack to expose the root
+    // WorkspaceLayout, which re-renders against the newly-selected
+    // workspace.
+    appNavigation.clearStack();
   }
 
   build() {

@@ -21,11 +21,21 @@ export struct WorkspaceLayout {
   aboutToAppear(): void {
     this.scheme = this.detectScheme();
     this.authUnsub = globalEvents.on('auth:required', () => {
-      appNavigation.replaceName('LoginPage');
+      appNavigation.clearStack();
+      appNavigation.pushName('LoginPage');
     });
     this.wsUnsub = globalEvents.on('workspace:changed', () => {
       this.recheckWorkspace();
     });
+    // Bug 2 fix: if the user is unauthed when this shell mounts,
+    // immediately overlay the login destination. Without this, the
+    // user lands on a permanent skeleton (the auth:required event
+    // never fires because there's nothing to invalidate).
+    if (authStore.getState().state !== 'authed') {
+      appNavigation.pushName('LoginPage');
+      this.bootstrapping = false;
+      return;
+    }
     this.bootRealtime();
     void this.bootstrap();
   }
@@ -66,7 +76,8 @@ export struct WorkspaceLayout {
 
   private recheckWorkspace(): void {
     if (!workspaceStore.currentId) {
-      appNavigation.replaceName('SelectWorkspacePage');
+      appNavigation.clearStack();
+      appNavigation.pushName('SelectWorkspacePage');
     }
   }
 

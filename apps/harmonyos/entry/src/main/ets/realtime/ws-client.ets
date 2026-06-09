@@ -130,7 +130,18 @@ export class WSClient {
 
   resume(): void {
     if (this.state !== 'paused') return;
-    this.state = 'active';
+    // Bug 5 fix: if the socket closed while we were paused (e.g.
+    // the server dropped the connection during background), the
+    // close handler skipped the reconnect schedule. Restoring
+    // 'active' state on its own would silently drop every event
+    // until the next manual `connect()` call. Reconnect now if
+    // the socket is gone.
+    if (this.socket === null) {
+      this.state = 'idle';
+      this.connect();
+    } else {
+      this.state = 'active';
+    }
   }
 
   disconnect(): void {

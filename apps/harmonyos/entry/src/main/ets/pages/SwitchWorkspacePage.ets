@@ -34,7 +34,9 @@ export struct SwitchWorkspacePage {
 
   private async pick(ws: Workspace): Promise<void> {
     await workspaceStore.setCurrent(ws.id, ws.slug);
-    appNavigation.replaceName('WorkspaceLayout');
+    // Bug 3 fix: same as SelectWorkspacePage — pop back to the root
+    // so the tab content refetches under the new workspace context.
+    appNavigation.clearStack();
   }
 
   build() {
