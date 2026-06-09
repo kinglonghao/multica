@@ -6,7 +6,6 @@ import { MulticaButton } from '../components/ui/Button';
 
 @ComponentV2
 export struct VerifyPage {
-  @Param initialEmail: string = '';
   @Local email: string = '';
   @Local code: string = '';
   @Local loading: boolean = false;
@@ -15,7 +14,14 @@ export struct VerifyPage {
 
   aboutToAppear(): void {
     this.scheme = this.detectScheme();
-    this.email = this.initialEmail;
+    // Read the email param from the top of the NavPathStack. We
+    // previously relied on `@Param initialEmail` set by the destination
+    // builder, but in practice the @Param prop didn't bind reliably
+    // when the parent is a @Builder function (the @Builder may not
+    // own the lifecycle that V2's prop binding expects). Reading
+    // directly from the stack is the official API path and the one
+    // that always reflects the param the caller pushed.
+    this.email = appNavigation.readString('VerifyPage', 'email', '');
   }
 
   private detectScheme(): ColorScheme {

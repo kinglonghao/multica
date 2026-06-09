@@ -16,7 +16,7 @@ import { Project, ListIssuesResponse } from '../models/types';
 
 @ComponentV2
 export struct ProjectDetailPage {
-  @Param id: string = '';
+  @Local id: string = '';
   @Local scheme: ColorScheme = 'light';
   @Local version: number = 0;
   private project: QueryHandle<Project> | null = null;
@@ -24,6 +24,9 @@ export struct ProjectDetailPage {
 
   aboutToAppear(): void {
     this.scheme = this.detectScheme();
+    // Read the id from the NavPathStack in aboutToAppear. See
+    // VerifyPage for why this is more reliable than @Param.
+    this.id = appNavigation.readString('ProjectDetailPage', 'id', '');
     this.project = useProjectDetailQuery(this.id, () => { this.version++; });
     this.issues = useIssueListQuery({ project_id: this.id }, () => { this.version++; });
   }

@@ -30,6 +30,8 @@ import { parseWSEnvelope } from '../lib/ws-validate';
 
 type State = 'idle' | 'connecting' | 'active' | 'paused' | 'failed';
 
+const MIN_RECONNECT_MS = 100;
+
 type Handler = (envelope: WSEnvelope) => void;
 type ReconnectHandler = () => void;
 
@@ -148,12 +150,20 @@ export class WSClient {
    * Exposed (package-private) for testing — `apps/mobile/lib/ws-client.test.ts`
    * mounts an instance and asserts the backoff curve. Returns the
    * retry handle so the test can synchronously advance.
+   *
+   * Floor: the jitter minimum is `MIN_RECONNECT_MS` (100ms). The
+   * classic "full jitter" formula `Math.random() * base` can return
+   * values arbitrarily close to 0; without a floor, a high-attempt
+   * backoff like `Math.random() * 30000` could yield 1ms and trigger
+   * a tight retry loop (a "reconnect storm") that hammers the server
+   * on the first non-error state. The floor keeps the gap bounded
+   * from below so the loop never tightens beyond 100ms.
    */
   scheduleReconnect(): number | null {
     if (this.retryHandle !== null) return this.retryHandle;
     const attempt = this.retryAttempt;
     const base = Math.min(30_000, 500 * Math.pow(2, attempt));
-    const jitter = Math.random() * base;
+    const jitter = Math.max(MIN_RECONNECT_MS, Math.random() * base);
     this.retryAttempt = attempt + 1;
     const handle = setTimeout(() => {
       this.retryHandle = null;

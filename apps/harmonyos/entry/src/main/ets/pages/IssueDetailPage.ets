@@ -15,19 +15,23 @@ import { Issue } from '../models/types';
 
 @ComponentV2
 export struct IssueDetailPage {
-  @Param id: string = '';
+  @Local id: string = '';
   @Local scheme: ColorScheme = 'light';
   @Local version: number = 0;
   private query: QueryHandle<Issue> | null = null;
 
   aboutToAppear(): void {
     this.scheme = this.detectScheme();
+    // Read the id from the NavPathStack. Reading from the stack in
+    // aboutToAppear (rather than relying on @Param from the destination
+    // builder) is the more reliable path — see VerifyPage for the
+    // same pattern and a fuller comment. The v0.3 build used @Param
+    // and the prop didn't bind reliably when the parent is a
+    // @Builder function.
+    this.id = appNavigation.readString('IssueDetailPage', 'id', '');
     // The query handle MUST be set up in aboutToAppear, NOT in a field
     // initializer. Field initializers run before aboutToAppear, and at
-    // that point this.id is still '' (the parent's @Param doesn't reach
-    // the child until the destination builder has run). Subscribing
-    // with the empty key would have made the first fetch hit
-    // '/api/issues/' and return 404 — the v0.1 bug.
+    // that point this.id is still '' (we set it just above).
     this.query = useIssueDetailQuery(this.id, () => { this.version++; });
   }
 

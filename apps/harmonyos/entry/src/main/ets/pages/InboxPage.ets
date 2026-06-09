@@ -46,6 +46,13 @@ export struct InboxPage {
    * `['issue', wsId, id]` (set up by `useIssueDetailQuery`), so
    * a later visit to the issue detail page reuses the fetched data
    * and the inbox row's title/identifier are populated.
+   *
+   * v0.4 hardening: bump `version` after every cache write so a
+   * page that didn't itself receive the `onUpdate` callback
+   * (e.g. a navigated-back instance whose subscription was torn
+   * down) still re-renders. Belt and suspenders — `@Local` should
+   * already fire on the map reference swap, but the extra bump
+   * makes the data flow obvious to the next reader.
    */
   private async hydrateIssueCache(): Promise<void> {
     if (!this.query) return;
@@ -63,6 +70,7 @@ export struct InboxPage {
         const next = new Map(this.issueCache);
         next.set(item.issue_id, issue);
         this.issueCache = next;
+        this.version++;
       } catch (err) {
         console.warn('[inbox] hydrate issue failed', err);
       }

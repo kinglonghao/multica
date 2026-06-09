@@ -26,6 +26,14 @@ export default class EntryAbility extends UIAbility {
     // synchronously in their aboutToAppear — initializing here means the
     // first frame is painted with the right values, not a flash of the
     // default state.
+    //
+    // INTENTIONAL FALLBACK: if preferences init fails (corrupt store,
+    // permission denied, etc.) we log the error and continue to
+    // loadContent(). The Index page's boot sequence will find no token
+    // and route to LoginPage — a user can still sign in (which writes
+    // a fresh preferences record) and the app stays functional.
+    // Crashing the ability here would leave the user with a dead app
+    // and no recovery path.
     try {
       await PreferencesBootstrap.init(this.context);
     } catch (err) {

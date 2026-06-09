@@ -33,6 +33,13 @@ export struct WorkspaceLayout {
   aboutToDisappear(): void {
     this.authUnsub?.();
     this.wsUnsub?.();
+    // Disconnect the WS on leave so a forced sign-out (auth:required)
+    // doesn't leave the socket connected and continuing to receive
+    // events for a workspace the user no longer has access to.
+    // The earlier code only disconnected on explicit logout, which
+    // meant the socket could outlive the auth session and silently
+    // fail the 401 path on every reconnect.
+    wsClient.disconnect();
   }
 
   private detectScheme(): ColorScheme {

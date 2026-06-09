@@ -12,7 +12,7 @@ import { Skeleton } from '../components/ui/Skeleton';
 
 @ComponentV2
 export struct ChatDetailPage {
-  @Param id: string = '';
+  @Local id: string = '';
   @Local scheme: ColorScheme = 'light';
   @Local version: number = 0;
   @Local inputDraft: string = '';
@@ -22,6 +22,7 @@ export struct ChatDetailPage {
 
   aboutToAppear(): void {
     this.scheme = this.detectScheme();
+    this.id = appNavigation.readString('ChatDetailPage', 'id', '');
     this.session = useQuery<ChatSession>(
       ['chat-session', this.id],
       ({ signal }) => api.getChatSession(this.id, { signal }),
