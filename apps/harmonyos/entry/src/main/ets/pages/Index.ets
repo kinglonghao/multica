@@ -13,33 +13,24 @@ import { PageDestinations } from './destinations';
  * (LoginPage, IssueDetailPage, …) are plain `@ComponentV2` structs
  * with no `@Entry` decorator — they're mounted by `PageDestinations`.
  *
- * v0.5 design (fixes Bug 2 + Bug 3 from the v0.4 review):
+ * v0.6 design (Bug fix on top of v0.5):
  *
- * The root content is ALWAYS `WorkspaceLayout`. This makes
- * "navigate back to the main shell" trivial — `appNavigation.clearStack()`
- * returns the user to the root, which already shows the workspace
- * shell with its tab bar.
+ * v0.5 had a duplicate-push bug. Both `Index.boot()` and
+ * `WorkspaceLayout.aboutToAppear` would call
+ * `appNavigation.pushName('LoginPage')` for an unauthed user,
+ * leaving the destination stack with [LoginPage, LoginPage]. A
+ * single `pop()` would reveal a second LoginPage instead of
+ * WorkspaceLayout.
  *
- * - Authed user: root renders WorkspaceLayout, which shows its
- *   workspace content (Inbox/My Issues/Chat/More tabs).
- * - Unauthed user: after `boot()` runs, we call
- *   `appNavigation.pushName('LoginPage')` to overlay the login
- *   destination on top of the root. The user sees LoginPage;
- *   cancelling the auth flow pops back to the root, which the
- *   unauthed WorkspaceLayout replaces with another push.
- *
- * The v0.4 design tried to switch the root content between
- * WorkspaceLayout and LoginPage based on `initialRoute` state. That
- * was buggy: `initialRoute` only flipped once on mount, so an
- * auth:required event after sign-out had no path back to the login
- * page. Pushing LoginPage onto the destination stack is the
- * right tool here.
+ * Fix: this page no longer owns the splash-vs-shell decision.
+ * The root content is always `WorkspaceLayout`, and the auth
+ * check lives in `WorkspaceLayout.aboutToAppear` only. Index
+ * just kicks the workspace list fetch in the background.
  */
 @Entry
 @ComponentV2
 struct Index {
   @Local scheme: ColorScheme = 'light';
-  @Local bootstrapping: boolean = true;
 
   aboutToAppear(): void {
     this.scheme = this.detectScheme();
@@ -48,28 +39,14 @@ struct Index {
 
   private async boot(): Promise<void> {
     try {
+      // We only need the workspace store's stored-current-workspace
+      // so the API client can attach X-Workspace-Slug on its first
+      // request. WorkspaceLayout's own bootstrap kicks off the
+      // list fetch — Index doesn't need to.
       await workspaceStore.loadFromStorage();
       await authStore.initialize();
-      const state = authStore.getState();
-      if (state.state === 'authed') {
-        // WorkspaceLayout's own bootstrap will fetch the workspace
-        // list and pick the current workspace. We just need to make
-        // sure the boot is done before the user sees the shell.
-        workspaceStore.fetchWorkspaces().catch((err: Error) => {
-          console.warn('[index] workspace fetch on boot failed', err);
-        });
-      } else {
-        // Overlay the login destination on top of the root
-        // WorkspaceLayout. The destination builder is registered by
-        // the time build() returns, so this push lands cleanly.
-        appNavigation.pushName('LoginPage');
-      }
     } catch (err) {
       console.error('[index] boot failed', err);
-      // On any boot failure, fall through to login.
-      appNavigation.pushName('LoginPage');
-    } finally {
-      this.bootstrapping = false;
     }
   }
 
@@ -79,27 +56,11 @@ struct Index {
 
   build() {
     Navigation(appNavigation.stack) {
-      if (this.bootstrapping) {
-        // Brief splash while boot() resolves. The destination builder
-        // (PageDestinations) handles anything pushed on top.
-        Stack({ alignContent: Alignment.Center }) {
-          MulticaText({
-            value: 'Multica',
-            scheme: this.scheme,
-            size: '2xl',
-            weight: 'bold',
-            color: 'foreground'
-          })
-        }
-        .width('100%')
-        .height('100%')
-        .backgroundColor(String(THEME[this.scheme].background))
-      } else {
-        // The root content is always WorkspaceLayout — the tab bar
-        // + tab content for authed users, or a self-recovering
-        // shell for unauthed users (it pushes LoginPage on top).
-        WorkspaceLayout()
-      }
+      // Always WorkspaceLayout. The shell handles its own splash
+      // (via its own `bootstrapping` flag) AND its own auth check
+      // (via the aboutToAppear in WorkspaceLayout.ets). Index is
+      // a thin shell around the navigation root.
+      WorkspaceLayout()
     }
     .mode(NavigationMode.Stack)
     .hideTitleBar(true)
