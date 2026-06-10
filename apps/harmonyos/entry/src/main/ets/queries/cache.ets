@@ -115,6 +115,17 @@ class QueryClient {
     return key.join('|');
   }
 
+  /**
+   * Synchronous read of a cached entry. Returns undefined when
+   * the key has no cache entry (the typical case before the
+   * first fetch settles). Mutations use this to read the
+   * optimistic-patch baseline before applying their own write.
+   */
+  get<T>(key: QueryKey): QueryState<T> | undefined {
+    const entry = this.entries.get(this.keyOf(key));
+    return entry ? (entry.state as QueryState<T>) : undefined;
+  }
+
   subscribe<T>(
     key: QueryKey,
     fetcher: Fetcher<T>,

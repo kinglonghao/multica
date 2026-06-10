@@ -58,8 +58,10 @@ export function useIssueRealtime(issueId: string | null): Unsub {
     }));
     unsubs.push(wsClient.on<{ id: string; issue_id: string; }>('issue:deleted', (env) => {
       if (env.payload.id !== issueId) return;
-      queryClient.invalidate(key);
-      function key(): never { throw new Error('unreachable'); }
+      // Invalidate the issue-detail cache; the issue list will
+      // pick up the deletion via the listing-level subscription
+      // (or the next refetch on the page that owns the list).
+      queryClient.invalidate(issueDetailKey(wsId, issueId));
     }));
   } else {
     unsubs.push(wsClient.on<{ issue: Issue }>('issue:updated', () => {
@@ -84,7 +86,10 @@ export function useIssueRealtime(issueId: string | null): Unsub {
 export function useInboxRealtime(): Unsub {
   const wsId = workspaceStore.currentId;
   const unsubs: Unsub[] = [];
-  for (const evt of ['inbox:created', 'inbox:updated', 'inbox:deleted'] as const) {
+  // Each event name is typed as WSEventType (a string union) so
+  // wsClient.on's generic dispatch picks the right payload shape.
+  const inboxEvents: WSEventType[] = ['inbox:created', 'inbox:updated', 'inbox:deleted'];
+  for (const evt of inboxEvents) {
     unsubs.push(wsClient.on(evt, () => {
       queryClient.invalidate(inboxQueryKey(wsId));
     }));

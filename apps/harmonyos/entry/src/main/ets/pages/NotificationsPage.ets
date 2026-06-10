@@ -9,7 +9,7 @@ import { IconButton } from '../components/ui/IconButton';
 import { Skeleton } from '../components/ui/Skeleton';
 import { MulticaButton } from '../components/ui/Button';
 
-const PREFS_QUERY_KEY = ['notification-prefs', 'self'] as const;
+const PREFS_QUERY_KEY: readonly string[] = ['notification-prefs', 'self'];
 const PREFS_STALE_MS = 60_000;
 
 @ComponentV2
