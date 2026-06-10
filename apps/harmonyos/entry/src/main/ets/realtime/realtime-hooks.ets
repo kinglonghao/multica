@@ -4,7 +4,7 @@ import { workspaceStore } from '../data/workspace';
 import { inboxQueryKey } from '../queries/inbox';
 import { issueListKey, issueDetailKey } from '../queries/issue';
 import { projectDetailKey, projectListKey } from '../queries/project';
-import { InboxItem, Issue, Project } from '../models/types';
+import { InboxItem, Issue, Project, WSEventType } from '../models/types';
 
 /**
  * Realtime hooks. Mirrors the iOS app's data/realtime hooks
