@@ -3,7 +3,11 @@ import { useIssueDetailQuery, QueryHandle } from '../queries/issue';
 import { useQuery, QueryHandle as QH } from '../queries/cache';
 import { useIssueRealtime } from '../realtime/realtime-hooks';
 import { api } from '../data/api';
-import { createComment } from '../mutations/issue';
+import { createComment, updateComment, deleteComment, updateIssue } from '../mutations/issue';
+import { queryClient } from '../queries/cache';
+import { workspaceStore } from '../data/workspace';
+import { issueDetailKey } from '../queries/issue';
+import { authStore } from '../data/auth';
 import { THEME, ColorScheme, SPACE, RADIUS, textColor } from '../lib/theme';
 import { timeAgo } from '../lib/utils';
 import { statusLabel, priorityLabel } from '../lib/issue-status';
@@ -28,6 +32,9 @@ export struct IssueDetailPage {
   @Local commentDraft: string = '';
   @Local sendingComment: boolean = false;
   @Local commentError: string = '';
+  @Local editingCommentId: string = '';
+  @Local editingDraft: string = '';
+  @Local savingEdit: boolean = false;
   private query: QueryHandle<Issue> | null = null;
   private comments: QH<Comment[]> | null = null;
   private wsUnsub?: () => void;
@@ -69,6 +76,42 @@ export struct IssueDetailPage {
       this.commentError = err instanceof Error ? err.message : 'Failed to post comment';
     } finally {
       this.sendingComment = false;
+    }
+  }
+
+  private startEditing(c: Comment): void {
+    this.editingCommentId = c.id;
+    this.editingDraft = c.body;
+  }
+
+  private cancelEditing(): void {
+    this.editingCommentId = '';
+    this.editingDraft = '';
+  }
+
+  private async saveEdit(): Promise<void> {
+    if (!this.editingCommentId || this.savingEdit) return;
+    const text = this.editingDraft.trim();
+    if (!text) return;
+    this.savingEdit = true;
+    try {
+      await updateComment(this.id, this.editingCommentId, text);
+      this.editingCommentId = '';
+      this.editingDraft = '';
+      this.comments?.refetch();
+    } catch (err) {
+      console.warn('[issue] edit comment failed', err);
+    } finally {
+      this.savingEdit = false;
+    }
+  }
+
+  private async removeComment(c: Comment): Promise<void> {
+    try {
+      await deleteComment(this.id, c.id);
+      this.comments?.refetch();
+    } catch (err) {
+      console.warn('[issue] delete comment failed', err);
     }
   }
 
@@ -252,14 +295,65 @@ export struct IssueDetailPage {
             color: 'mutedForeground'
           })
         }
-        MulticaText({
-          value: c.body,
-          scheme: this.scheme,
-          size: 'sm',
-          color: 'foreground'
-        })
+        if (this.editingCommentId === c.id) {
+          TextArea({ text: this.editingDraft })
+            .placeholderColor(String(THEME[this.scheme].mutedForeground))
+            .fontColor(String(THEME[this.scheme].foreground))
+            .backgroundColor(String(THEME[this.scheme].card))
+            .borderRadius(RADIUS.md)
+            .padding(SPACE['2'])
+            .width('100%')
+            .height(80)
+            .margin({ top: SPACE['1'] })
+            .onChange((value: string) => { this.editingDraft = value; })
+          Row() {
+            MulticaButton({
+              label: this.savingEdit ? 'Saving…' : 'Save',
+              scheme: this.scheme, variant: 'primary', size: 'sm',
+              disabled: this.savingEdit || this.editingDraft.trim().length === 0,
+              onTap: () => { void this.saveEdit(); }
+            })
+            MulticaButton({
+              label: 'Cancel',
+              scheme: this.scheme, variant: 'ghost', size: 'sm',
+              onTap: () => { this.cancelEditing(); }
+            })
+              .margin({ left: SPACE['2'] })
+          }
           .margin({ top: SPACE['1'] })
-          .width('100%')
+        } else {
+          MulticaText({
+            value: c.body,
+            scheme: this.scheme,
+            size: 'sm',
+            color: 'foreground'
+          })
+            .margin({ top: SPACE['1'] })
+            .width('100%')
+          // Edit / delete affordance for the comment's author.
+          if (c.author_id === authStore.getState().user?.id) {
+            Row() {
+              MulticaText({
+                value: 'Edit',
+                scheme: this.scheme,
+                size: 'xs',
+                weight: 'medium',
+                color: 'brand'
+              })
+                .onClick(() => { this.startEditing(c); })
+              MulticaText({
+                value: 'Delete',
+                scheme: this.scheme,
+                size: 'xs',
+                weight: 'medium',
+                color: 'destructive'
+              })
+                .margin({ left: SPACE['4'] })
+                .onClick(() => { void this.removeComment(c); })
+            }
+            .margin({ top: SPACE['1'] })
+          }
+        }
       }
       .layoutWeight(1)
       .margin({ left: SPACE['2'] })
@@ -329,6 +423,50 @@ export struct IssueDetailPage {
     .backgroundColor(String(THEME[this.scheme].card))
     .borderRadius(RADIUS.full)
     .margin({ right: SPACE['2'] })
+    // Tapping the chip cycles to the next value. The full
+    // formSheet picker (iOS parity) is a follow-up — the
+    // cycle is enough to expose the underlying mutation
+    // hook (updateIssue) and verify the optimistic patch /
+    // server roundtrip path.
+    .onClick(() => { this.cycleAttribute(kind); })
+  }
+
+  /**
+   * Cycle an issue attribute to the next value and fire the
+   * updateIssue mutation. Local optimistic write flips the
+   * displayed chip synchronously, then the server's response
+   * overwrites.
+   */
+  private cycleAttribute(kind: 'status' | 'priority'): void {
+    if (!this.query) return;
+    const cur = this.query.getState().data;
+    if (!cur) return;
+    if (kind === 'status') {
+      const order: Issue['status'][] = ['backlog', 'todo', 'in_progress', 'in_review', 'done', 'cancelled'];
+      const idx = order.indexOf(cur.status);
+      const next = order[(idx + 1) % order.length];
+      this.updateAttribute({ status: next });
+    } else {
+      const order: Issue['priority'][] = ['no_priority', 'low', 'medium', 'high', 'urgent'];
+      const idx = order.indexOf(cur.priority);
+      const next = order[(idx + 1) % order.length];
+      this.updateAttribute({ priority: next });
+    }
+  }
+
+  private async updateAttribute(patch: { status?: Issue['status']; priority?: Issue['priority'] }): Promise<void> {
+    if (!this.query) return;
+    const cur = this.query.getState().data;
+    if (!cur) return;
+    try {
+      const saved = await updateIssue(this.id, patch);
+      // The mutation already invalidates the issue list prefix;
+      // we patch the local detail cache with the server's
+      // authoritative response so the chip flips immediately.
+      queryClient.setQueryData<Issue>(issueDetailKey(workspaceStore.currentId, this.id), saved);
+    } catch (err) {
+      console.warn('[issue] cycle attribute failed', err);
+    }
   }
 
   @Builder Loading() {
