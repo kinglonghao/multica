@@ -1,5 +1,9 @@
 import { appNavigation } from '../data/navigation';
 import { useIssueDetailQuery, QueryHandle } from '../queries/issue';
+import { useQuery, QueryHandle as QH } from '../queries/cache';
+import { useIssueRealtime } from '../realtime/realtime-hooks';
+import { api } from '../data/api';
+import { createComment } from '../mutations/issue';
 import { THEME, ColorScheme, SPACE, RADIUS, textColor } from '../lib/theme';
 import { timeAgo } from '../lib/utils';
 import { statusLabel, priorityLabel } from '../lib/issue-status';
@@ -10,37 +14,62 @@ import { StatusIcon } from '../components/ui/StatusIcon';
 import { PriorityIcon } from '../components/ui/PriorityIcon';
 import { Avatar } from '../components/ui/Avatar';
 import { IconButton } from '../components/ui/IconButton';
+import { MulticaButton } from '../components/ui/Button';
 import { Card } from '../components/ui/Card';
-import { Issue } from '../models/types';
+import { Issue, Comment } from '../models/types';
+
+const COMMENTS_KEY = (id: string): readonly (string | number | boolean)[] => ['issue-comments', id];
 
 @ComponentV2
 export struct IssueDetailPage {
   @Local id: string = '';
   @Local scheme: ColorScheme = 'light';
   @Local version: number = 0;
+  @Local commentDraft: string = '';
+  @Local sendingComment: boolean = false;
+  @Local commentError: string = '';
   private query: QueryHandle<Issue> | null = null;
+  private comments: QH<Comment[]> | null = null;
+  private wsUnsub?: () => void;
 
   aboutToAppear(): void {
     this.scheme = this.detectScheme();
-    // Read the id from the NavPathStack. Reading from the stack in
-    // aboutToAppear (rather than relying on @Param from the destination
-    // builder) is the more reliable path — see VerifyPage for the
-    // same pattern and a fuller comment. The v0.3 build used @Param
-    // and the prop didn't bind reliably when the parent is a
-    // @Builder function.
     this.id = appNavigation.readString('IssueDetailPage', 'id', '');
-    // The query handle MUST be set up in aboutToAppear, NOT in a field
-    // initializer. Field initializers run before aboutToAppear, and at
-    // that point this.id is still '' (we set it just above).
     this.query = useIssueDetailQuery(this.id, () => { this.version++; });
+    this.comments = useQuery<Comment[]>(
+      COMMENTS_KEY(this.id),
+      ({ signal }) => api.listComments(this.id, { signal }),
+      { staleTimeMs: 10_000, onUpdate: () => { this.version++; } }
+    );
+    // Subscribe to issue:updated events for this specific issue.
+    // The hook also patches the cache for us on each update.
+    this.wsUnsub = useIssueRealtime(this.id);
   }
 
   aboutToDisappear(): void {
     this.query?.unsubscribe();
+    this.comments?.unsubscribe();
+    this.wsUnsub?.();
   }
 
   private detectScheme(): ColorScheme {
     return 'light';
+  }
+
+  private async submitComment(): Promise<void> {
+    const text = this.commentDraft.trim();
+    if (!text || this.sendingComment) return;
+    this.sendingComment = true;
+    this.commentError = '';
+    try {
+      await createComment(this.id, text);
+      this.commentDraft = '';
+      this.comments?.refetch();
+    } catch (err) {
+      this.commentError = err instanceof Error ? err.message : 'Failed to post comment';
+    } finally {
+      this.sendingComment = false;
+    }
   }
 
   build() {
@@ -90,73 +119,194 @@ export struct IssueDetailPage {
         } else if (state.error) {
           this.ErrorState(state.error!.message)
         } else if (state.data) {
-          const issue = state.data;
-          Column() {
-            MulticaText({
-              value: issue.identifier,
-              scheme: this.scheme,
-              size: 'xs',
-              color: 'mutedForeground',
-              weight: 'medium'
-            })
-            MulticaText({
-              value: issue.title,
-              scheme: this.scheme,
-              size: 'xl',
-              weight: 'bold',
-              color: 'foreground'
-            })
-              .margin({ top: SPACE['2'] })
-
-            Row() {
-              this.AttributeChip(issue.status, 'status')
-              this.AttributeChip(issue.priority, 'priority')
-            }
-            .margin({ top: SPACE['3'] })
-
-            if (issue.description) {
-              Card({ scheme: this.scheme, padding: SPACE['4'], gap: SPACE['2'] }) {
-                MulticaText({
-                  value: issue.description,
-                  scheme: this.scheme,
-                  size: 'base',
-                  color: 'foreground'
-                })
-              }
-              .margin({ top: SPACE['4'] })
-              .width('100%')
-            }
-
-            if (issue.assignee_name) {
-              Row() {
-                Avatar({ name: issue.assignee_name, url: issue.assignee_avatar_url ?? '', size: 32, scheme: this.scheme })
-                MulticaText({
-                  value: `Assigned to ${issue.assignee_name}`,
-                  scheme: this.scheme,
-                  size: 'sm',
-                  color: 'foreground'
-                })
-                  .margin({ left: SPACE['2'] })
-              }
-              .margin({ top: SPACE['3'] })
-            }
-
-            MulticaText({
-              value: `Created ${timeAgo(issue.created_at)} · Updated ${timeAgo(issue.updated_at)}`,
-              scheme: this.scheme,
-              size: 'xs',
-              color: 'mutedForeground'
-            })
-              .margin({ top: SPACE['3'] })
-          }
-          .width('100%')
-          .padding(SPACE['4'])
-          .alignItems(HorizontalAlign.Start)
+          this.IssueHeader(state.data)
+          this.Timeline()
+          this.Composer()
         }
       }
     }
     .layoutWeight(1)
     .width('100%')
+  }
+
+  @Builder IssueHeader(issue: Issue) {
+    Column() {
+      MulticaText({
+        value: issue.identifier,
+        scheme: this.scheme,
+        size: 'xs',
+        color: 'mutedForeground',
+        weight: 'medium'
+      })
+      MulticaText({
+        value: issue.title,
+        scheme: this.scheme,
+        size: 'xl',
+        weight: 'bold',
+        color: 'foreground'
+      })
+        .margin({ top: SPACE['2'] })
+
+      Row() {
+        this.AttributeChip(issue.status, 'status')
+        this.AttributeChip(issue.priority, 'priority')
+      }
+      .margin({ top: SPACE['3'] })
+
+      if (issue.description) {
+        Card({ scheme: this.scheme, padding: SPACE['4'], gap: SPACE['2'] }) {
+          MulticaText({
+            value: issue.description,
+            scheme: this.scheme,
+            size: 'base',
+            color: 'foreground'
+          })
+        }
+        .margin({ top: SPACE['4'] })
+        .width('100%')
+      }
+
+      if (issue.assignee_name) {
+        Row() {
+          Avatar({ name: issue.assignee_name, url: issue.assignee_avatar_url ?? '', size: 32, scheme: this.scheme })
+          MulticaText({
+            value: `Assigned to ${issue.assignee_name}`,
+            scheme: this.scheme,
+            size: 'sm',
+            color: 'foreground'
+          })
+            .margin({ left: SPACE['2'] })
+        }
+        .margin({ top: SPACE['3'] })
+      }
+
+      MulticaText({
+        value: `Created ${timeAgo(issue.created_at)} · Updated ${timeAgo(issue.updated_at)}`,
+        scheme: this.scheme,
+        size: 'xs',
+        color: 'mutedForeground'
+      })
+        .margin({ top: SPACE['3'] })
+
+      MulticaText({
+        value: 'Activity',
+        scheme: this.scheme,
+        size: 'md',
+        weight: 'semibold',
+        color: 'foreground'
+      })
+        .margin({ top: SPACE['6'], bottom: SPACE['2'] })
+        .width('100%')
+    }
+    .width('100%')
+    .padding(SPACE['4'])
+    .alignItems(HorizontalAlign.Start)
+  }
+
+  @Builder Timeline() {
+    if (!this.comments) {
+      return;
+    }
+    const state = this.comments.getState();
+    Column() {
+      if (state.isLoading) {
+        ForEach([1, 2, 3], () => {
+          Skeleton({ scheme: this.scheme, width: '100%', height: 56, radius: 8 })
+            .margin({ top: SPACE['2'] })
+        })
+      } else if (state.data && state.data.length > 0) {
+        ForEach(state.data, (c: Comment) => {
+          this.CommentRow(c)
+        })
+      } else {
+        MulticaText({
+          value: 'No activity yet. Be the first to comment.',
+          scheme: this.scheme,
+          size: 'sm',
+          color: 'mutedForeground'
+        })
+          .width('100%')
+      }
+    }
+    .width('100%')
+    .padding({ left: SPACE['4'], right: SPACE['4'] })
+    .alignItems(HorizontalAlign.Start)
+  }
+
+  @Builder CommentRow(c: Comment) {
+    Row() {
+      Avatar({ name: c.author_name ?? '·', url: c.author_avatar_url ?? '', size: 32, scheme: this.scheme })
+      Column() {
+        Row() {
+          MulticaText({
+            value: c.author_name ?? 'Unknown',
+            scheme: this.scheme,
+            size: 'sm',
+            weight: 'medium',
+            color: 'foreground'
+          })
+          MulticaText({
+            value: ` · ${timeAgo(c.created_at)}`,
+            scheme: this.scheme,
+            size: 'xs',
+            color: 'mutedForeground'
+          })
+        }
+        MulticaText({
+          value: c.body,
+          scheme: this.scheme,
+          size: 'sm',
+          color: 'foreground'
+        })
+          .margin({ top: SPACE['1'] })
+          .width('100%')
+      }
+      .layoutWeight(1)
+      .margin({ left: SPACE['2'] })
+      .alignItems(HorizontalAlign.Start)
+    }
+    .width('100%')
+    .padding({ top: SPACE['3'], bottom: SPACE['3'] })
+    .border({
+      width: { top: 1 },
+      color: String(THEME[this.scheme].border)
+    })
+  }
+
+  @Builder Composer() {
+    Column() {
+      if (this.commentError) {
+        MulticaText({
+          value: this.commentError,
+          scheme: this.scheme,
+          size: 'sm',
+          color: 'destructive'
+        })
+          .margin({ bottom: SPACE['2'] })
+          .width('100%')
+      }
+      TextArea({ placeholder: 'Write a comment…', text: this.commentDraft })
+        .placeholderColor(String(THEME[this.scheme].mutedForeground))
+        .fontColor(String(THEME[this.scheme].foreground))
+        .backgroundColor(String(THEME[this.scheme].card))
+        .borderRadius(RADIUS.md)
+        .padding(SPACE['3'])
+        .width('100%')
+        .height(100)
+        .onChange((value: string) => { this.commentDraft = value; })
+      MulticaButton({
+        label: this.sendingComment ? 'Posting…' : 'Comment',
+        scheme: this.scheme,
+        variant: 'primary',
+        size: 'sm',
+        disabled: this.sendingComment || this.commentDraft.trim().length === 0,
+        onTap: () => { void this.submitComment(); }
+      })
+        .margin({ top: SPACE['2'] })
+    }
+    .width('100%')
+    .padding(SPACE['4'])
+    .alignItems(HorizontalAlign.End)
   }
 
   @Builder AttributeChip(value: string, kind: 'status' | 'priority') {

@@ -1,6 +1,7 @@
 import { appNavigation } from '../data/navigation';
 import { api } from '../data/api';
 import { useQuery, QueryHandle } from '../queries/cache';
+import { useChatRealtime } from '../realtime/realtime-hooks';
 import { ChatMessage, ChatSession } from '../models/types';
 import { THEME, ColorScheme, SPACE, RADIUS } from '../lib/theme';
 import { timeAgo } from '../lib/utils';
@@ -17,8 +18,10 @@ export struct ChatDetailPage {
   @Local version: number = 0;
   @Local inputDraft: string = '';
   @Local sending: boolean = false;
+  @Local sendError: string = '';
   private session: QueryHandle<ChatSession> | null = null;
   private messages: QueryHandle<ChatMessage[]> | null = null;
+  private wsUnsub?: () => void;
 
   aboutToAppear(): void {
     this.scheme = this.detectScheme();
@@ -33,11 +36,16 @@ export struct ChatDetailPage {
       ({ signal }) => api.listChatMessages(this.id, { signal }),
       { staleTimeMs: 10_000, onUpdate: () => { this.version++; } }
     );
+    // Subscribe to chat:message events for this session. The
+    // hook patches the cache in place — incoming assistant
+    // messages stream in without a refetch.
+    this.wsUnsub = useChatRealtime(this.id);
   }
 
   aboutToDisappear(): void {
     this.session?.unsubscribe();
     this.messages?.unsubscribe();
+    this.wsUnsub?.();
   }
 
   private detectScheme(): ColorScheme {
@@ -48,12 +56,16 @@ export struct ChatDetailPage {
     const text = this.inputDraft.trim();
     if (!text || this.sending) return;
     this.sending = true;
+    this.sendError = '';
     try {
       await api.sendChatMessage(this.id, text);
       this.inputDraft = '';
+      // Refetch on send so the user's message + the agent's
+      // eventual response both land; the WS hook handles the
+      // interim assistant message.
       this.messages?.refetch();
     } catch (err) {
-      console.warn('[chat] send failed', err);
+      this.sendError = err instanceof Error ? err.message : 'Failed to send message';
     } finally {
       this.sending = false;
     }
@@ -91,6 +103,17 @@ export struct ChatDetailPage {
       }
       .layoutWeight(1)
       .width('100%')
+
+      if (this.sendError) {
+        MulticaText({
+          value: this.sendError,
+          scheme: this.scheme,
+          size: 'xs',
+          color: 'destructive'
+        })
+          .width('100%')
+          .padding({ left: SPACE['4'], right: SPACE['4'], top: SPACE['1'] })
+      }
 
       Row() {
         TextInput({ placeholder: 'Message…', text: this.inputDraft })

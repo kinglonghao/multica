@@ -1,6 +1,7 @@
 import { appNavigation } from '../data/navigation';
 import { useInboxQuery } from '../queries/inbox';
 import { useQuery, QueryHandle } from '../queries/cache';
+import { useInboxRealtime } from '../realtime/realtime-hooks';
 import { api } from '../data/api';
 import { queryClient } from '../queries/cache';
 import { workspaceStore } from '../data/workspace';
@@ -26,6 +27,7 @@ export struct InboxPage {
   // (because neither has written yet) and double-fetch the same
   // issue. The Set tracks IDs whose fetch is in flight.
   private hydrationInFlight: Set<string> = new Set();
+  private wsUnsub?: () => void;
 
   aboutToAppear(): void {
     this.scheme = this.detectScheme();
@@ -34,10 +36,15 @@ export struct InboxPage {
       void this.hydrateIssueCache();
     });
     void this.hydrateIssueCache();
+    // Subscribe to inbox:created / inbox:updated / inbox:deleted
+    // events for the current workspace. The hook invalidates
+    // the inbox list cache so the next subscriber refetches.
+    this.wsUnsub = useInboxRealtime();
   }
 
   aboutToDisappear(): void {
     this.query?.unsubscribe();
+    this.wsUnsub?.();
   }
 
   private detectScheme(): ColorScheme {

@@ -11,6 +11,8 @@ import cacheTest from './cache.test';
 import wsClientTest from './ws-client.test';
 import mutationsTest from './mutations.test';
 import wsValidateTest from './ws-validate.test';
+import realtimeHooksTest from './realtime-hooks.test';
+import pinMutationsTest from './pin-mutations.test';
 
 export default function testsuite(): void {
   inboxDisplayTest();
@@ -20,4 +22,6 @@ export default function testsuite(): void {
   wsClientTest();
   mutationsTest();
   wsValidateTest();
+  realtimeHooksTest();
+  pinMutationsTest();
 }

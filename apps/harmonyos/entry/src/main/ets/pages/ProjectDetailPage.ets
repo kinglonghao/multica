@@ -1,6 +1,7 @@
 import { appNavigation } from '../data/navigation';
 import { useProjectDetailQuery, QueryHandle } from '../queries/project';
 import { useIssueListQuery } from '../queries/issue';
+import { useProjectRealtime } from '../realtime/realtime-hooks';
 import { THEME, ColorScheme, SPACE, RADIUS } from '../lib/theme';
 import { timeAgo } from '../lib/utils';
 import { projectStatusLabel, projectPriorityLabel } from '../lib/project-status';
@@ -21,19 +22,20 @@ export struct ProjectDetailPage {
   @Local version: number = 0;
   private project: QueryHandle<Project> | null = null;
   private issues: QueryHandle<ListIssuesResponse> | null = null;
+  private wsUnsub?: () => void;
 
   aboutToAppear(): void {
     this.scheme = this.detectScheme();
-    // Read the id from the NavPathStack in aboutToAppear. See
-    // VerifyPage for why this is more reliable than @Param.
     this.id = appNavigation.readString('ProjectDetailPage', 'id', '');
     this.project = useProjectDetailQuery(this.id, () => { this.version++; });
     this.issues = useIssueListQuery({ project_id: this.id }, () => { this.version++; });
+    this.wsUnsub = useProjectRealtime(this.id);
   }
 
   aboutToDisappear(): void {
     this.project?.unsubscribe();
     this.issues?.unsubscribe();
+    this.wsUnsub?.();
   }
 
   private detectScheme(): ColorScheme {
