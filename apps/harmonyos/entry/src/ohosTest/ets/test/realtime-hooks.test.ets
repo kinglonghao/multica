@@ -98,7 +98,52 @@ export default function realtimeHooksTest(): void {
       const unsub = useProjectRealtime('prj-1');
       fireEvent('project:updated', { id: 'prj-1', project: mkProject({ id: 'prj-1', name: 'new' }) });
       const after = queryClient.get<Project>(['project', 'ws-1', 'prj-1']);
+      // v1.0: the cache must hold the Project object, not the
+      // envelope. If the envelope slipped in, the name field
+      // would be undefined (Project has no `project` sub-key).
       expect(after?.data?.name).assertEqual('new');
+      expect((after?.data as unknown as { project?: unknown })?.project).assertEqual(undefined);
+      unsub();
+    });
+
+    it('ignores events for other projects', () => {
+      queryClient.setQueryData<Project>(['project', 'ws-1', 'prj-1'], mkProject({ id: 'prj-1', name: 't1' }));
+      const unsub = useProjectRealtime('prj-1');
+      fireEvent('project:updated', { id: 'prj-2', project: mkProject({ id: 'prj-2', name: 't2' }) });
+      const after = queryClient.get<Project>(['project', 'ws-1', 'prj-1']);
+      expect(after?.data?.name).assertEqual('t1');
+      unsub();
+    });
+  });
+
+  describe('useIssueRealtime comment + reaction subscriptions', () => {
+    it('invalidates the comment list on comment:created for this issue', () => {
+      queryClient.setQueryData<unknown[]>(['issue-comments', 'iss-1'], [{ id: 'c-old' }]);
+      const unsub = useIssueRealtime('iss-1');
+      fireEvent('comment:created', { id: 'c-new', issue_id: 'iss-1' });
+      const after = queryClient.get<unknown[]>(['issue-comments', 'iss-1']);
+      // Invalidation drops the cache entry; get returns undefined.
+      expect(after).assertEqual(undefined);
+      unsub();
+    });
+
+    it('ignores comment events for other issues', () => {
+      queryClient.setQueryData<unknown[]>(['issue-comments', 'iss-1'], [{ id: 'c-old' }]);
+      const unsub = useIssueRealtime('iss-1');
+      fireEvent('comment:created', { id: 'c-new', issue_id: 'iss-2' });
+      const after = queryClient.get<unknown[]>(['issue-comments', 'iss-1']);
+      // The cache entry should still be there — the comment is
+      // for a different issue.
+      expect(after?.data?.length).assertEqual(1);
+      unsub();
+    });
+
+    it('invalidates the comment list on reaction:added', () => {
+      queryClient.setQueryData<unknown[]>(['issue-comments', 'iss-1'], [{ id: 'c-1' }]);
+      const unsub = useIssueRealtime('iss-1');
+      fireEvent('reaction:added', { comment_id: 'c-1', issue_id: 'iss-1' });
+      const after = queryClient.get<unknown[]>(['issue-comments', 'iss-1']);
+      expect(after).assertEqual(undefined);
       unsub();
     });
   });

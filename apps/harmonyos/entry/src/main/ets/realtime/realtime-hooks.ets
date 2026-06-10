@@ -44,6 +44,20 @@ const projectListPrefix = (wsId: string | null): QueryKey => ['projects', wsId];
  *   - issueId: when provided, only the issue-detail and timeline
  *     caches are patched. When null, the hook is "listing-level" and
  *     patches every issue-list cache.
+ *
+ * Per-record subscriptions (issueId !== null):
+ *   - issue:updated     — setQueryData on issueDetailKey
+ *   - issue:deleted     — invalidate issueDetailKey
+ *   - comment:created   — invalidate ['issue-comments', id]
+ *   - comment:updated   — invalidate ['issue-comments', id]
+ *   - comment:deleted   — invalidate ['issue-comments', id]
+ *   - reaction:added    — invalidate ['issue-comments', id]
+ *   - reaction:removed  — invalidate ['issue-comments', id]
+ *
+ * Listing-level subscriptions (issueId === null):
+ *   - issue:created     — invalidatePrefix issue list
+ *   - issue:updated     — invalidatePrefix issue list
+ *   - issue:deleted     — invalidatePrefix issue list
  */
 export function useIssueRealtime(issueId: string | null): Unsub {
   const unsubs: Unsub[] = [];
@@ -62,6 +76,34 @@ export function useIssueRealtime(issueId: string | null): Unsub {
       // pick up the deletion via the listing-level subscription
       // (or the next refetch on the page that owns the list).
       queryClient.invalidate(issueDetailKey(wsId, issueId));
+    }));
+
+    // v1.0: the per-record subscription also covers comment and
+    // reaction events for this issue. The previous v0.7 comment
+    // claimed it did this but the actual subscriptions were
+    // missing. Comment events invalidate the comment list cache;
+    // reaction events invalidate the same cache because the
+    // detail view re-fetches reactions with the comments.
+    const commentListKey: QueryKey = ['issue-comments', issueId];
+    unsubs.push(wsClient.on<{ id: string; issue_id: string; }>('comment:created', (env) => {
+      if (env.payload.issue_id !== issueId) return;
+      queryClient.invalidate(commentListKey);
+    }));
+    unsubs.push(wsClient.on<{ id: string; issue_id: string; }>('comment:updated', (env) => {
+      if (env.payload.issue_id !== issueId) return;
+      queryClient.invalidate(commentListKey);
+    }));
+    unsubs.push(wsClient.on<{ id: string; issue_id: string; }>('comment:deleted', (env) => {
+      if (env.payload.issue_id !== issueId) return;
+      queryClient.invalidate(commentListKey);
+    }));
+    unsubs.push(wsClient.on<{ comment_id: string; issue_id: string; }>('reaction:added', (env) => {
+      if (env.payload.issue_id !== issueId) return;
+      queryClient.invalidate(commentListKey);
+    }));
+    unsubs.push(wsClient.on<{ comment_id: string; issue_id: string; }>('reaction:removed', (env) => {
+      if (env.payload.issue_id !== issueId) return;
+      queryClient.invalidate(commentListKey);
     }));
   } else {
     unsubs.push(wsClient.on<{ issue: Issue }>('issue:updated', () => {
@@ -107,7 +149,11 @@ export function useProjectRealtime(projectId: string | null): Unsub {
   if (projectId) {
     unsubs.push(wsClient.on<{ id: string; project: Project }>('project:updated', (env) => {
       if (env.payload.id !== projectId) return;
-      queryClient.setQueryData<Project>(projectDetailKey(wsId, projectId), env.payload);
+      // v1.0 fix: the cache entry needs the Project object
+      // (env.payload.project), not the whole envelope
+      // (env.payload) — the latter has shape `{ id, project }`,
+      // which would corrupt the ProjectDetailPage's read.
+      queryClient.setQueryData<Project>(projectDetailKey(wsId, projectId), env.payload.project);
     }));
   } else {
     unsubs.push(wsClient.on('project:updated', () => {
