@@ -13,6 +13,8 @@ import mutationsTest from './mutations.test';
 import wsValidateTest from './ws-validate.test';
 import realtimeHooksTest from './realtime-hooks.test';
 import pinMutationsTest from './pin-mutations.test';
+import parseResponseTest from './parse-response.test';
+import realtimeContractTest from './realtime-contract.test';
 
 export default function testsuite(): void {
   inboxDisplayTest();
@@ -24,4 +26,6 @@ export default function testsuite(): void {
   wsValidateTest();
   realtimeHooksTest();
   pinMutationsTest();
+  parseResponseTest();
+  realtimeContractTest();
 }
