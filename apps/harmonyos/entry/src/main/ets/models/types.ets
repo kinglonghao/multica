@@ -408,6 +408,20 @@ export interface IssueLabelsResponse {
  * Realtime event names from packages/core/types/events.ts. The HarmonyOS
  * client subscribes via the same names as the iOS client — the server
  * speaks one WS protocol.
+ *
+ * The runtime registry that backs this union lives in
+ * `lib/ws-events.ets::WSEventNames`. Both files are derived by hand
+ * from `packages/core/types/events.ts::WSEventType` and must stay
+ * in lockstep — `scripts/diff-harmonyos-types.ts` (CI + rebase gate)
+ * fails if they drift.
+ *
+ * The trailing `| string` is intentional: a brand-new event name
+ * emitted by a server we haven't mirrored yet is still accepted by
+ * the validator (the protocol is the source of truth — we must not
+ * brick existing clients when a server deploys a new event). The
+ * registry's purpose is to *detect* the gap loudly via
+ * `assertWSEventRegistry()` (see `realtime/ws-client.ets`), not to
+ * *prevent* it.
  */
 export type WSEventType =
   | 'issue:created'
@@ -416,15 +430,71 @@ export type WSEventType =
   | 'comment:created'
   | 'comment:updated'
   | 'comment:deleted'
+  | 'comment:resolved'
+  | 'comment:unresolved'
+  | 'agent:status'
+  | 'agent:created'
+  | 'agent:archived'
+  | 'agent:restored'
+  | 'task:queued'
+  | 'task:dispatch'
+  | 'task:running'
+  | 'task:waiting_local_directory'
+  | 'task:progress'
+  | 'task:completed'
+  | 'task:failed'
+  | 'task:message'
+  | 'task:cancelled'
+  | 'inbox:new'
+  | 'inbox:read'
+  | 'inbox:archived'
+  | 'inbox:batch-read'
+  | 'inbox:batch-archived'
+  | 'workspace:updated'
+  | 'workspace:deleted'
+  | 'member:added'
+  | 'member:updated'
+  | 'member:removed'
+  | 'daemon:heartbeat'
+  | 'daemon:register'
+  | 'skill:created'
+  | 'skill:updated'
+  | 'skill:deleted'
+  | 'subscriber:added'
+  | 'subscriber:removed'
+  | 'activity:created'
   | 'reaction:added'
   | 'reaction:removed'
-  | 'inbox:created'
-  | 'inbox:updated'
-  | 'inbox:deleted'
+  | 'issue_reaction:added'
+  | 'issue_reaction:removed'
   | 'chat:message'
-  | 'chat:task'
+  | 'chat:done'
+  | 'chat:session_read'
+  | 'chat:session_deleted'
+  | 'chat:session_updated'
+  | 'project:created'
   | 'project:updated'
-  | 'presence:update'
+  | 'project:deleted'
+  | 'squad:created'
+  | 'squad:updated'
+  | 'squad:deleted'
+  | 'label:created'
+  | 'label:updated'
+  | 'label:deleted'
+  | 'issue_labels:changed'
+  | 'issue_metadata:changed'
+  | 'pin:created'
+  | 'pin:deleted'
+  | 'pin:reordered'
+  | 'invitation:created'
+  | 'invitation:accepted'
+  | 'invitation:declined'
+  | 'invitation:revoked'
+  | 'github_installation:created'
+  | 'github_installation:deleted'
+  | 'pull_request:linked'
+  | 'pull_request:updated'
+  | 'pull_request:unlinked'
   | string;
 
 export interface WSEnvelope<T = unknown> {
