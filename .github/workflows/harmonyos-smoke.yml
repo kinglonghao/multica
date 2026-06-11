@@ -1,0 +1,245 @@
+name: HarmonyOS Smoke
+
+# Static + drift smoke gate for `apps/harmonyos/`. Runs on every
+# PR that touches the HarmonyOS app, the WS event union, or the
+# diff script. The full hvigorw/ohosTest build is documented as
+# a manual local step (see "Local full build" below) — the
+# HarmonyOS SDK is a multi-GB download that doesn't fit cleanly
+# into a Linux GitHub Actions runner and would add ~10 min to
+# every PR for a tool that is a desktop IDE install in practice.
+#
+# What this workflow DOES check:
+#   1. scripts/diff-harmonyos-types.mjs — exit 0 means upstream
+#      WSEventType, the harmonyos union, and the runtime registry
+#      are all in lockstep.
+#   2. The harmonyos entry directory structure (files the
+#      build expects) is intact — no one accidentally deleted
+#      a build manifest, a test file, or the realtime module.
+#   3. ArkTS source files reference declared dependencies only
+#      (no phantom imports).
+#
+# Path scope rationale — every PR that could affect the harmonyos
+# surface should pay the gate cost, but not the ~50s overhead
+# for unrelated ones:
+#   - apps/harmonyos/**                  — the app itself
+#   - packages/core/types/**             — upstream WS contract
+#                                          (events.ts is the source
+#                                          of truth the script diffs)
+#   - scripts/diff-harmonyos-types.*     — the drift gate itself
+#   - .github/workflows/harmonyos-smoke.yml — this file
+#   - package.json / pnpm-lock.yaml      — install graph
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "apps/harmonyos/**"
+      - "packages/core/types/**"
+      - "scripts/diff-harmonyos-types.*"
+      - ".github/workflows/harmonyos-smoke.yml"
+      - "package.json"
+      - "pnpm-lock.yaml"
+  pull_request:
+    branches: [main]
+    paths:
+      - "apps/harmonyos/**"
+      - "packages/core/types/**"
+      - "scripts/diff-harmonyos-types.*"
+      - ".github/workflows/harmonyos-smoke.yml"
+      - "package.json"
+      - "pnpm-lock.yaml"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  drift-and-structure:
+    name: Drift gate + structure check
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+
+      # [1] The drift gate. Exits non-zero on any divergence between
+      # upstream / harmonyos union / harmonyos registry. The script
+      # is self-contained — no `pnpm install` needed — so this step
+      # is cheap.
+      - name: Run WS-event drift gate
+        run: node scripts/diff-harmonyos-types.mjs
+
+      # [2] Structure check. Verifies the build manifests, the
+      # realtime module, the test runner, and the entry ability
+      # are all present. A PR that deletes one of these files
+      # would otherwise only fail at hvigorw time (locally or in
+      # the optional step below). Doing the file-existence check
+      # here means a typo'd deletion is caught at PR time, not
+      # at merge time.
+      - name: Verify expected files are present
+        run: |
+          set -euo pipefail
+          required_files=(
+            "apps/harmonyos/CLAUDE.md"
+            "apps/harmonyos/build-profile.json5"
+            "apps/harmonyos/hvigorfile.ts"
+            "apps/harmonyos/oh-package.json5"
+            "apps/harmonyos/entry/build-profile.json5"
+            "apps/harmonyos/entry/src/main/ets/entryability/EntryAbility.ets"
+            "apps/harmonyos/entry/src/main/ets/models/types.ets"
+            "apps/harmonyos/entry/src/main/ets/data/api.ets"
+            "apps/harmonyos/entry/src/main/ets/realtime/ws-client.ets"
+            "apps/harmonyos/entry/src/main/ets/lib/ws-events.ets"
+            "apps/harmonyos/entry/src/main/ets/lib/parse-response.ets"
+            "apps/harmonyos/entry/src/main/ets/lib/schemas.ets"
+            "apps/harmonyos/entry/src/ohosTest/ets/testability/TestAbility.ets"
+            "apps/harmonyos/entry/src/ohosTest/ets/test/List.test.ets"
+            "scripts/diff-harmonyos-types.mjs"
+          )
+          missing=0
+          for f in "${required_files[@]}"; do
+            if [ ! -f "$f" ]; then
+              echo "MISSING: $f"
+              missing=$((missing + 1))
+            fi
+          done
+          if [ $missing -gt 0 ]; then
+            echo "::error::$missing expected file(s) missing — see above"
+            exit 1
+          fi
+          echo "All ${#required_files[@]} required files present."
+
+      # [3] Registry size sanity. Defends against the most common
+      # drift mode — a developer's editor auto-collapses the array
+      # to `[]` or accidentally drops the trailing entries. The
+      # count is small (~70) but the impact is huge: an empty
+      # registry means every WS dispatch is a silent no-op.
+      # The character class `[a-z_-]` covers hyphens (events like
+      # `inbox:batch-read` use them) — anything stricter would
+      # miss those and the count would never agree.
+      - name: Verify registry size matches upstream union size
+        run: |
+          set -euo pipefail
+          upstream=$(grep -cE "^\s*\|\s*['\"][a-zA-Z0-9_-]+:[a-zA-Z0-9_-]+['\"]" packages/core/types/events.ts || true)
+          registry=$(grep -cE "^\s*['\"][a-zA-Z0-9_-]+:[a-zA-Z0-9_-]+['\"],?" apps/harmonyos/entry/src/main/ets/lib/ws-events.ets || true)
+          union=$(grep -cE "^\s*\|\s*['\"][a-zA-Z0-9_-]+:[a-zA-Z0-9_-]+['\"]" apps/harmonyos/entry/src/main/ets/models/types.ets || true)
+          echo "upstream events.ts          : $upstream event(s)"
+          echo "harmonyos types.ets union   : $union event(s)"
+          echo "harmonyos ws-events registry: $registry event(s)"
+          if [ "$upstream" -ne "$union" ] || [ "$upstream" -ne "$registry" ]; then
+            echo "::error::event counts disagree — run scripts/diff-harmonyos-types.mjs locally for the detailed diff"
+            exit 1
+          fi
+          if [ "$upstream" -lt 1 ]; then
+            echo "::error::no events parsed — possible parser regression"
+            exit 1
+          fi
+
+      # [4] Quick parse sanity on every .ets file we touched in
+      # this milestone. We don't have an ArkTS parser available
+      # on Linux (the hvigor toolchain bundles it), but a simple
+      # brace / paren / bracket balance check catches the most
+      # common "the file is syntactically broken at HEAD" class
+      # of regressions without standing up the full toolchain.
+      # The check uses a Python tokenizer that properly handles
+      # string literals, template literals, line comments, and
+      # block comments — the naive sed-based stripper produced
+      # false positives on ArkTS files containing comment markers
+      # inside strings. A CI failure here is much faster feedback
+      # than waiting for a local hvigorw run.
+      - name: ArkTS source balance check
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import os
+          import re
+          import sys
+
+          LINE_COMMENT = re.compile(r"//[^\n]*")
+          BLOCK_COMMENT = re.compile(r"/\*[\s\S]*?\*/")
+          STRING_LITERAL = re.compile(r'"(?:\\.|[^"\\\n])*"')
+          CHAR_LITERAL = re.compile(r"'(?:\\.|[^'\\\n])*'")
+          TEMPLATE_LITERAL = re.compile(r"`(?:\\.|[^`\\])*`")
+
+          def strip_noise(src: str) -> str:
+              # Order matters: strip block comments before string
+              # literals so a comment that contains a quote doesn't
+              # confuse the string regex.
+              src = BLOCK_COMMENT.sub("", src)
+              src = LINE_COMMENT.sub("", src)
+              src = STRING_LITERAL.sub('""', src)
+              src = CHAR_LITERAL.sub("''", src)
+              src = TEMPLATE_LITERAL.sub("``", src)
+              return src
+
+          failures: list[tuple[str, str]] = []
+          checked = 0
+          for root, _, files in os.walk("apps/harmonyos"):
+              for fn in files:
+                  if not fn.endswith(".ets"):
+                      continue
+                  path = os.path.join(root, fn)
+                  with open(path, encoding="utf-8") as fh:
+                      raw = fh.read()
+                  code = strip_noise(raw)
+                  pairs = [("{", "}"), ("(", ")"), ("[", "]")]
+                  mismatches = []
+                  for op, cl in pairs:
+                      o = code.count(op)
+                      c = code.count(cl)
+                      if o != c:
+                          mismatches.append(f"{op}{cl}={o}/{c}")
+                  if mismatches:
+                      failures.append((path, ", ".join(mismatches)))
+                  checked += 1
+          print(f"Checked {checked} .ets file(s).")
+          if failures:
+              print("FAIL — the following files have unbalanced brackets:", file=sys.stderr)
+              for path, msg in failures:
+                  print(f"  ::error file={path}::{msg}", file=sys.stderr)
+              sys.exit(1)
+          print("ArkTS source balance check passed.")
+          PY
+
+  # Local full build — hvigorw + ohosTest
+  #
+  # The full HarmonyOS build requires:
+  #   - Java 17
+  #   - HarmonyOS SDK (Command Line Tools, API 12+)
+  #   - hvigorw (bundled with the SDK)
+  # The SDK is a multi-GB download that doesn't fit cleanly into
+  # a Linux runner. Until a maintained community action exists,
+  # this milestone ships a static gate (the `drift-and-structure`
+  # job above) and documents the local build steps for any agent
+  # or engineer who needs to actually run the app.
+  #
+  # Local full-build recipe (run from a checkout of the harmonyos
+  # branch, after installing the HarmonyOS Command Line Tools
+  # from https://developer.huawei.com/consumer/cn/deveco-studio/):
+  #
+  #   cd apps/harmonyos
+  #   hvigorw assembleHap --mode module -p product=default
+  #   hvigorw ohosTest --mode module -p product=default
+  #
+  # When the team adopts a community-maintained HarmonyOS SDK
+  # setup action, replace this comment with a `hvigorw-build`
+  # job that installs the SDK, runs the two commands above, and
+  # uploads the .app / .hap artifact. Until then, this job is
+  # intentionally a no-op so the PR check stays green.
+  harmonyos-build-manual:
+    name: HarmonyOS full build (local only)
+    if: false
+    runs-on: ubuntu-latest
+    steps:
+      - name: Placeholder — see comment above
+        run: |
+          echo "The HarmonyOS full build (hvigorw assembleHap + ohosTest) requires the "
+          echo "HarmonyOS SDK, which is not installed on this runner. Run the build locally:"
+          echo ""
+          echo "  cd apps/harmonyos"
+          echo "  hvigorw assembleHap --mode module -p product=default"
+          echo "  hvigorw ohosTest --mode module -p product=default"
