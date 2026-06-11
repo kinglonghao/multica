@@ -39,12 +39,40 @@ import {
   User,
   Workspace
 } from '../models/types';
+import { parseWithFallback } from '../lib/parse-response';
+import {
+  AgentTaskListSchema,
+  ChatMessageListSchema,
+  CommentListSchema,
+  CommentSchema,
+  EMPTY_AGENT_TASK_LIST,
+  EMPTY_CHAT_MESSAGE_LIST,
+  EMPTY_COMMENT,
+  EMPTY_COMMENT_LIST,
+  EMPTY_INBOX_LIST,
+  EMPTY_ISSUE,
+  EMPTY_LIST_ISSUES_RESPONSE,
+  EMPTY_LIST_PROJECTS_RESPONSE,
+  EMPTY_PROJECT,
+  InboxListSchema,
+  IssueSchema,
+  ListIssuesResponseSchema,
+  ListProjectsResponseSchema,
+  ProjectSchema
+} from '../lib/schemas';
 
 /**
  * Mobile-owned fetch wrapper. Mirrors the iOS ApiClient (apps/mobile/data/api.ts).
  *
  * Design checklist (mirroring apps/mobile/CLAUDE.md "ApiClient capability list"):
- *   1. Zod-like schema validation via parseWithFallback (drift defense)
+ *   1. Schema validation via parseWithFallback (drift defense). Every read
+ *      endpoint that returns a typed entity the UI renders — Issue, Comment,
+ *      Project, InboxItem, AgentTask, ChatMessage + their list envelopes —
+ *      runs the response body through a Schema and falls back to a safe
+ *      EMPTY_* on failure. The iOS implementation has this for every
+ *      endpoint; we have it for the M1-stability-critical surface and grow
+ *      the coverage incrementally. See `lib/schemas.ets` for the per-type
+ *      validators and `lib/parse-response.ets` for the helper.
  *   2. onUnauthorized callback on 401 (auto sign-out, avoids retry loops)
  *   3. X-Request-ID per request + structured logger (debug + tracing)
  *   4. Bearer auth + X-Workspace-Slug — NOT cookie auth (no CSRF, no credentials)
@@ -216,7 +244,14 @@ class ApiClient {
   // -------- Inbox --------
 
   async listInbox(opts?: RequestOpts): Promise<InboxItem[]> {
-    return this.request<InboxItem[]>('GET', '/api/inbox', undefined, opts);
+    // Drift-safe read: server may add a new field, drop one, or
+    // change a type and we don't want a single bad row to take
+    // down the inbox tab. Falls back to an empty array; the page
+    // renders the empty state instead of a half-populated list.
+    const raw = await this.request<unknown>('GET', '/api/inbox', undefined, opts);
+    return parseWithFallback(raw, InboxListSchema, EMPTY_INBOX_LIST, {
+      endpoint: 'GET /api/inbox'
+    });
   }
 
   async markInboxRead(id: string): Promise<void> {
@@ -261,11 +296,25 @@ class ApiClient {
     if (params.page) search.set('page', String(params.page));
     if (params.page_size) search.set('page_size', String(params.page_size));
     const qs = search.toString();
-    return this.request<ListIssuesResponse>('GET', `/api/issues${qs ? '?' + qs : ''}`, undefined, opts);
+    const raw = await this.request<unknown>(
+      'GET',
+      `/api/issues${qs ? '?' + qs : ''}`,
+      undefined,
+      opts
+    );
+    return parseWithFallback(raw, ListIssuesResponseSchema, EMPTY_LIST_ISSUES_RESPONSE, {
+      endpoint: 'GET /api/issues'
+    });
   }
 
   async getIssue(id: string, opts?: RequestOpts): Promise<Issue> {
-    return this.request<Issue>('GET', `/api/issues/${id}`, undefined, opts);
+    // Drift-safe read: the issue detail page checks
+    // `issue.id === ''` to render the "issue not found / shape
+    // drifted" error state instead of a half-populated page.
+    const raw = await this.request<unknown>('GET', `/api/issues/${id}`, undefined, opts);
+    return parseWithFallback(raw, IssueSchema, EMPTY_ISSUE, {
+      endpoint: 'GET /api/issues/:id'
+    });
   }
 
   async createIssue(req: CreateIssueRequest): Promise<Issue> {
@@ -287,15 +336,34 @@ class ApiClient {
   }
 
   async listComments(issueId: string, opts?: RequestOpts): Promise<Comment[]> {
-    return this.request<Comment[]>('GET', `/api/issues/${issueId}/comments`, undefined, opts);
+    const raw = await this.request<unknown>('GET', `/api/issues/${issueId}/comments`, undefined, opts);
+    return parseWithFallback(raw, CommentListSchema, EMPTY_COMMENT_LIST, {
+      endpoint: 'GET /api/issues/:id/comments'
+    });
   }
 
   async createComment(issueId: string, body: string, opts?: RequestOpts): Promise<Comment> {
-    return this.request<Comment>('POST', `/api/issues/${issueId}/comments`, { body }, { ...opts, endpoint: 'POST /api/issues/:id/comments' });
+    // Write endpoint that returns a Comment. We still validate
+    // the response shape so a server-side drift doesn't corrupt
+    // the optimistic update the mutation already applied to the
+    // cache. Fallback yields `id: ''` so the onSuccess writer
+    // detects drift and falls back to invalidate.
+    const raw = await this.request<unknown>(
+      'POST',
+      `/api/issues/${issueId}/comments`,
+      { body },
+      { ...opts, endpoint: 'POST /api/issues/:id/comments' }
+    );
+    return parseWithFallback(raw, CommentSchema, EMPTY_COMMENT, {
+      endpoint: 'POST /api/issues/:id/comments'
+    });
   }
 
   async updateComment(commentId: string, body: string): Promise<Comment> {
-    return this.request<Comment>('PATCH', `/api/comments/${commentId}`, { body });
+    const raw = await this.request<unknown>('PATCH', `/api/comments/${commentId}`, { body });
+    return parseWithFallback(raw, CommentSchema, EMPTY_COMMENT, {
+      endpoint: 'PATCH /api/comments/:id'
+    });
   }
 
   async deleteComment(commentId: string): Promise<void> {
@@ -305,11 +373,20 @@ class ApiClient {
   // -------- Projects --------
 
   async listProjects(opts?: RequestOpts): Promise<ListProjectsResponse> {
-    return this.request<ListProjectsResponse>('GET', '/api/projects', undefined, opts);
+    const raw = await this.request<unknown>('GET', '/api/projects', undefined, opts);
+    return parseWithFallback(raw, ListProjectsResponseSchema, EMPTY_LIST_PROJECTS_RESPONSE, {
+      endpoint: 'GET /api/projects'
+    });
   }
 
   async getProject(id: string, opts?: RequestOpts): Promise<Project> {
-    return this.request<Project>('GET', `/api/projects/${id}`, undefined, opts);
+    // Drift-safe parse — UI checks `data.id === ""` to render the
+    // "project not found / shape drifted" error state instead of
+    // a half-populated detail page.
+    const raw = await this.request<unknown>('GET', `/api/projects/${id}`, undefined, opts);
+    return parseWithFallback(raw, ProjectSchema, EMPTY_PROJECT, {
+      endpoint: 'GET /api/projects/:id'
+    });
   }
 
   async createProject(req: CreateProjectRequest): Promise<Project> {
@@ -353,7 +430,15 @@ class ApiClient {
   }
 
   async listChatMessages(sessionId: string, opts?: RequestOpts): Promise<ChatMessage[]> {
-    return this.request<ChatMessage[]>('GET', `/api/chat/sessions/${sessionId}/messages`, undefined, opts);
+    const raw = await this.request<unknown>(
+      'GET',
+      `/api/chat/sessions/${sessionId}/messages`,
+      undefined,
+      opts
+    );
+    return parseWithFallback(raw, ChatMessageListSchema, EMPTY_CHAT_MESSAGE_LIST, {
+      endpoint: 'GET /api/chat/sessions/:id/messages'
+    });
   }
 
   async sendChatMessage(sessionId: string, body: string): Promise<SendChatMessageResponse> {
@@ -367,7 +452,15 @@ class ApiClient {
   }
 
   async listAgentTasks(agentId: string, opts?: RequestOpts): Promise<AgentTask[]> {
-    return this.request<AgentTask[]>('GET', `/api/agents/${agentId}/tasks`, undefined, opts);
+    const raw = await this.request<unknown>(
+      'GET',
+      `/api/agents/${agentId}/tasks`,
+      undefined,
+      opts
+    );
+    return parseWithFallback(raw, AgentTaskListSchema, EMPTY_AGENT_TASK_LIST, {
+      endpoint: 'GET /api/agents/:id/tasks'
+    });
   }
 
   // -------- Members --------
