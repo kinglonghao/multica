@@ -14,3 +14,11 @@ local.properties
 
 # Logs
 *.log
+
+# Override the repo-root rule that ignores `data/` (intended for the
+# backend runtime data dir). HarmonyOS keeps its API client, auth,
+# preferences, and workspace stores under `entry/src/main/ets/data/` —
+# those are source files, not outputs. Per apps/mobile/CLAUDE.md
+# "Lesson #2", subtree overrides beat parent rules.
+!entry/src/main/ets/data/
+!entry/src/main/ets/data/**

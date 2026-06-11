@@ -38,6 +38,34 @@ new event name MUST also be added to the `WSEventType` union in
 because `this.handlers.get(event)` returns undefined for an
 unknown name.
 
+**After every rebase / merge of `main`**, run the drift gate:
+
+```bash
+node scripts/diff-harmonyos-types.mjs
+```
+
+The script compares three sources of truth — upstream
+`packages/core/types/events.ts::WSEventType`, the mirrored union
+in `models/types.ets::WSEventType`, and the runtime registry in
+`lib/ws-events.ets::WSEventNames` — and exits non-zero on drift.
+It is also wired into `.github/workflows/harmonyos-smoke.yml`
+(J1) so the same check runs on every PR that touches the
+harmonyos app or any core type. A green exit (`exit 0`) means
+all three are in lockstep; a red exit (`exit 1`) means at least
+one of them is behind `main`.
+
+**Why a separate runtime registry when the union already lists
+every event?** The TypeScript union is erased at runtime — a new
+event name added upstream compiles cleanly here, then is silently
+dropped at runtime by `wsClient.dispatch()` because
+`handlers.get(newEvent)` returns undefined. The registry gives us
+a Set to test membership against in `ws-client.ets::dispatch()`,
+so the silent skip becomes a logged warning at minimum. The
+startup-time `assertWSEventRegistry()` (also in `ws-client.ets`)
+walks the registry at boot and reports any event that has zero
+subscribers — call it from `EntryAbility` if you want a fail-fast
+on every cold start.
+
 ## Behavioral parity
 
 The HarmonyOS app is allowed to differ in **UI and interaction**
