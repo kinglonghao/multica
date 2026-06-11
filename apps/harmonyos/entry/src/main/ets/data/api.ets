@@ -16,6 +16,7 @@ import {
   InboxItem,
   Issue,
   IssueLabelsResponse,
+  IssueReaction,
   Label,
   ListIssuesParams,
   ListIssuesResponse,
@@ -370,6 +371,38 @@ class ApiClient {
     await this.request('DELETE', `/api/comments/${commentId}`);
   }
 
+  /**
+   * Toggle a reaction on a comment. The server treats each
+   * (comment_id, emoji, user_id) tuple as idempotent — repeated
+   * calls from the same user with the same emoji remove the
+   * existing reaction. The M2 client treats it as an add (the
+   * optimistic patch in `mutations/issue.ts::reactToComment`
+   * assumes a count++ outcome); the server returns whatever the
+   * current state is and the post-settle invalidate in
+   * `mutateDetail` will reconcile on the next refetch if the user
+   * toggled.
+   */
+  async reactToComment(commentId: string, emoji: string): Promise<IssueReaction> {
+    const raw = await this.request<unknown>(
+      'POST',
+      `/api/comments/${commentId}/reactions`,
+      { emoji },
+      { endpoint: 'POST /api/comments/:id/reactions' }
+    );
+    // Server contract: { id, comment_id, emoji, user_id, created_at }.
+    // We accept the same loose-shape treatment as the rest of
+    // the ApiClient — a partial response still gives the caller
+    // something to write into the cache, and the post-settle
+    // invalidate gives a clean re-fetch on the next user action.
+    const r = (raw && typeof raw === 'object') ? (raw as Record<string, unknown>) : {};
+    const id = typeof r['id'] === 'string' ? r['id'] as string : `temp-reaction-${Date.now()}`;
+    const cId = typeof r['comment_id'] === 'string' ? r['comment_id'] as string : commentId;
+    const em = typeof r['emoji'] === 'string' ? r['emoji'] as string : emoji;
+    const uId = typeof r['user_id'] === 'string' ? r['user_id'] as string : '';
+    const created = typeof r['created_at'] === 'string' ? r['created_at'] as string : new Date().toISOString();
+    return { id, comment_id: cId, emoji: em, user_id: uId, created_at: created };
+  }
+
   // -------- Projects --------
 
   async listProjects(opts?: RequestOpts): Promise<ListProjectsResponse> {
@@ -515,14 +548,167 @@ class ApiClient {
     return this.request<Attachment[]>('GET', `/api/attachments?parent_id=${parentId}`, undefined, opts);
   }
 
-  async uploadFile(parentId: string, file: { uri: string; name: string; type: string }): Promise<Attachment> {
-    // The shape mirrors the iOS FileAsset (apps/mobile/data/api.ts). On HarmonyOS
-    // uploads use the same FormData+RequestBody pattern via @ohos.net.http.
-    // Implementation is intentionally a stub here — the data flow is
-    // identical (multipart/form-data, X-Request-ID, Bearer auth) but the
-    // @ohos.net.http FormData surface differs from web fetch. Wire up the
-    // real upload in a follow-up.
-    throw new ApiError('uploadFile: not yet implemented on HarmonyOS', 501);
+  /**
+   * Multipart file upload. The shape mirrors the iOS FileAsset
+   * (`apps/mobile/data/api.ts::uploadFile`) — a `{ uri, name, type }`
+   * triple where `uri` is a HarmonyOS file descriptor (e.g. the
+   * `PhotoAccessHelper` picker result, the `CameraPicker` output,
+   * or a temp copy of an image the user picked for an avatar).
+   *
+   * The `@ohos.net.http` API takes a `multiFormDataList` array of
+   * `{ name, contentType, filePath, remoteFileName? }` entries —
+   * not the browser `FormData` shape. We translate our `file` /
+   * `parentId` / `parentKind` payload into that array inline and
+   * stay in lockstep with the iOS endpoint contract
+   * (`POST /api/upload-file`, fields: `file`, `issue_id?`,
+   * `comment_id?`).
+   *
+   * Why a dedicated path (not `this.request`):
+   *   - `this.request` always serializes `extraData` as JSON and
+   *     sets `Content-Type: application/json`. Multipart uploads
+   *     need a boundary the runtime itself sets; passing our own
+   *     `Content-Type` would suppress the boundary header and
+   *     break the request.
+   *   - The auth + 401 + structured-log shell is inlined here so
+   *     the request still goes through the same `X-Request-ID` /
+   *     `onUnauthorized` envelope as every other endpoint.
+   *
+   * The 30s hard timeout + signal handling from `this.request`
+   * is re-implemented inline for the same reason. Future port to
+   * the `request` helper would need a multipart-aware variant.
+   */
+  async uploadFile(
+    file: { uri: string; name: string; type: string },
+    opts: { issueId?: string; commentId?: string; signal?: AbortSignal } = {}
+  ): Promise<Attachment> {
+    const id = rid();
+    const url = `${BASE_URL}/api/upload-file`;
+    const token = Preferences.get('authToken');
+    const slug = Preferences.get('workspaceSlug');
+    const headers: Record<string, string> = {
+      'X-Request-ID': id
+      // Note: no Content-Type — the @ohos.net.http runtime sets
+      // `multipart/form-data; boundary=…` once it sees
+      // `multiFormDataList`.
+    };
+    if (token) headers['Authorization'] = `Bearer ${token}`;
+    if (slug) headers['X-Workspace-Slug'] = slug;
+
+    console.info(`[api] → POST /api/upload-file rid=${id} name=${file.name} type=${file.type}`);
+    const start = Date.now();
+
+    const multiFormDataList: http.MultiFormData[] = [
+      {
+        name: 'file',
+        contentType: file.type || 'application/octet-stream',
+        filePath: file.uri,
+        remoteFileName: file.name
+      }
+    ];
+    if (opts.issueId) {
+      multiFormDataList.push({ name: 'issue_id', contentType: 'text/plain', data: opts.issueId });
+    }
+    if (opts.commentId) {
+      multiFormDataList.push({ name: 'comment_id', contentType: 'text/plain', data: opts.commentId });
+    }
+
+    const httpRequest = http.createHttp();
+    const requestTask = httpRequest.request(url, {
+      method: http.RequestMethod.POST,
+      header: headers,
+      multiFormDataList,
+      connectTimeout: FETCH_TIMEOUT_MS,
+      readTimeout: FETCH_TIMEOUT_MS
+    });
+
+    let timeoutHandle: ReturnType<typeof setTimeout> | null = null;
+    const timeoutPromise = new Promise<never>((_, reject) => {
+      timeoutHandle = setTimeout(() => {
+        httpRequest.destroy();
+        reject(new ApiError('Request timeout', 0));
+      }, FETCH_TIMEOUT_MS);
+    });
+
+    let externalAbortHandler: (() => void) | null = null;
+    if (opts.signal) {
+      if (opts.signal.aborted) {
+        httpRequest.destroy();
+        if (timeoutHandle) clearTimeout(timeoutHandle);
+        throw new ApiError('Aborted', 0);
+      }
+      externalAbortHandler = (): void => {
+        httpRequest.destroy();
+        if (timeoutHandle) clearTimeout(timeoutHandle);
+      };
+      opts.signal.addEventListener('abort', externalAbortHandler);
+    }
+
+    try {
+      const response = await Promise.race([requestTask, timeoutPromise]);
+      if (timeoutHandle) clearTimeout(timeoutHandle);
+      if (externalAbortHandler && opts.signal) {
+        opts.signal.removeEventListener('abort', externalAbortHandler);
+      }
+      httpRequest.destroy();
+
+      const status = response.responseCode;
+      const rawBody = response.result as string;
+      const duration = Date.now() - start;
+      const logFn = status >= 500 ? console.error : status === 404 ? console.warn : console.info;
+      logFn(`[api] ← ${status} /api/upload-file rid=${id} dur=${duration}ms`);
+
+      if (status === 401) {
+        this.options.onUnauthorized?.();
+        throw new ApiError('Unauthorized', 401, rawBody);
+      }
+      if (status < 200 || status >= 300) {
+        throw new ApiError(`HTTP ${status}`, status, rawBody);
+      }
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(rawBody);
+      } catch {
+        throw new ApiError('Invalid JSON response', status, rawBody);
+      }
+      // Loose shape — the server contract is documented at
+      // packages/core/api/schemas. We accept missing optional
+      // fields and substitute the `id` / `url` the caller most
+      // often needs (avatar / comment-image rendering). A server
+      // contract drift logs a warning but does not throw — the
+      // upload succeeded, the result is the broken part.
+      if (!parsed || typeof parsed !== 'object') {
+        console.warn(`[api] uploadFile: non-object response, treating as empty Attachment`);
+        return {
+          id: '',
+          parent_id: opts.issueId ?? opts.commentId ?? '',
+          url: '',
+          name: file.name,
+          content_type: file.type,
+          size: 0,
+          created_at: new Date().toISOString()
+        } as Attachment;
+      }
+      const r = parsed as Record<string, unknown>;
+      return {
+        id: typeof r['id'] === 'string' ? r['id'] as string : '',
+        parent_id:
+          typeof r['parent_id'] === 'string'
+            ? r['parent_id'] as string
+            : (opts.issueId ?? opts.commentId ?? ''),
+        url: typeof r['url'] === 'string' ? r['url'] as string : '',
+        name: typeof r['name'] === 'string' ? r['name'] as string : file.name,
+        content_type: typeof r['content_type'] === 'string' ? r['content_type'] as string : file.type,
+        size: typeof r['size'] === 'number' ? r['size'] as number : 0,
+        created_at: typeof r['created_at'] === 'string' ? r['created_at'] as string : new Date().toISOString()
+      } as Attachment;
+    } catch (err) {
+      if (timeoutHandle) clearTimeout(timeoutHandle);
+      if (externalAbortHandler && opts.signal) {
+        opts.signal.removeEventListener('abort', externalAbortHandler);
+      }
+      httpRequest.destroy();
+      throw err;
+    }
   }
 
   // -------- Search --------

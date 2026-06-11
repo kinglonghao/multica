@@ -3,10 +3,7 @@ import { useIssueDetailQuery, QueryHandle } from '../queries/issue';
 import { useQuery, QueryHandle as QH } from '../queries/cache';
 import { useIssueRealtime } from '../realtime/realtime-hooks';
 import { api } from '../data/api';
-import { createComment, updateComment, deleteComment, updateIssue } from '../mutations/issue';
-import { queryClient } from '../queries/cache';
-import { workspaceStore } from '../data/workspace';
-import { issueDetailKey } from '../queries/issue';
+import { createComment, updateComment, deleteComment } from '../mutations/issue';
 import { authStore } from '../data/auth';
 import { THEME, ColorScheme, SPACE, RADIUS, textColor } from '../lib/theme';
 import { timeAgo } from '../lib/utils';
@@ -20,6 +17,7 @@ import { Avatar } from '../components/ui/Avatar';
 import { IconButton } from '../components/ui/IconButton';
 import { MulticaButton } from '../components/ui/Button';
 import { Card } from '../components/ui/Card';
+import { Markdown } from '../components/ui/Markdown';
 import { Issue, Comment } from '../models/types';
 
 const COMMENTS_KEY = (id: string): readonly (string | number | boolean)[] => ['issue-comments', id];
@@ -198,11 +196,10 @@ export struct IssueDetailPage {
 
       if (issue.description) {
         Card({ scheme: this.scheme, padding: SPACE['4'], gap: SPACE['2'] }) {
-          MulticaText({
+          Markdown({
             value: issue.description,
             scheme: this.scheme,
-            size: 'base',
-            color: 'foreground'
+            onLinkPress: (url: string): void => { this.openLink(url); }
           })
         }
         .margin({ top: SPACE['4'] })
@@ -423,50 +420,41 @@ export struct IssueDetailPage {
     .backgroundColor(String(THEME[this.scheme].card))
     .borderRadius(RADIUS.full)
     .margin({ right: SPACE['2'] })
-    // Tapping the chip cycles to the next value. The full
-    // formSheet picker (iOS parity) is a follow-up — the
-    // cycle is enough to expose the underlying mutation
-    // hook (updateIssue) and verify the optimistic patch /
-    // server roundtrip path.
-    .onClick(() => { this.cycleAttribute(kind); })
+    // M2 (WS-106 H1): tapping the chip opens the dedicated
+    // picker page instead of cycling through values. The
+    // picker page runs the optimistic updateIssue mutation
+    // and pops back; the chip re-renders with the new value
+    // when the page next reads the cache.
+    .onClick(() => { this.openAttributePicker(kind); })
   }
 
   /**
-   * Cycle an issue attribute to the next value and fire the
-   * updateIssue mutation. Local optimistic write flips the
-   * displayed chip synchronously, then the server's response
-   * overwrites.
+   * Open the dedicated picker page for the attribute. The
+   * picker is a Navigation destination, not a sheet — the
+   * HarmonyOS app uses a page stack (formSheet presentation
+   * isn't a first-class pattern in the V2 Navigation API the
+   * same way it is on iOS UISheetPresentationController).
+   * Semantics match the iOS formSheet picker: self-contained
+   * page that reads from cache, fires the mutation on select,
+   * and pops back to the detail screen.
    */
-  private cycleAttribute(kind: 'status' | 'priority'): void {
-    if (!this.query) return;
-    const cur = this.query.getState().data;
-    if (!cur) return;
+  private openAttributePicker(kind: 'status' | 'priority'): void {
+    if (!this.id) return;
     if (kind === 'status') {
-      const order: Issue['status'][] = ['backlog', 'todo', 'in_progress', 'in_review', 'done', 'cancelled'];
-      const idx = order.indexOf(cur.status);
-      const next = order[(idx + 1) % order.length];
-      this.updateAttribute({ status: next });
+      appNavigation.pushName('IssueStatusPickerPage', { id: this.id });
     } else {
-      const order: Issue['priority'][] = ['no_priority', 'low', 'medium', 'high', 'urgent'];
-      const idx = order.indexOf(cur.priority);
-      const next = order[(idx + 1) % order.length];
-      this.updateAttribute({ priority: next });
+      appNavigation.pushName('IssuePriorityPickerPage', { id: this.id });
     }
   }
 
-  private async updateAttribute(patch: { status?: Issue['status']; priority?: Issue['priority'] }): Promise<void> {
-    if (!this.query) return;
-    const cur = this.query.getState().data;
-    if (!cur) return;
-    try {
-      const saved = await updateIssue(this.id, patch);
-      // The mutation already invalidates the issue list prefix;
-      // we patch the local detail cache with the server's
-      // authoritative response so the chip flips immediately.
-      queryClient.setQueryData<Issue>(issueDetailKey(workspaceStore.currentId, this.id), saved);
-    } catch (err) {
-      console.warn('[issue] cycle attribute failed', err);
-    }
+  private openLink(url: string): void {
+    // Outbound link handling. ArkUI doesn't ship a
+    // `Linking.openURL`-style helper; a future port can
+    // wire in `@ohos.app.ability.StartAbility` for browser
+    // handoff. For now we log the intent — the link is
+    // rendered as styled brand-colored text and the user
+    // can long-press to copy.
+    console.info(`[issue] openLink: ${url}`);
   }
 
   @Builder Loading() {

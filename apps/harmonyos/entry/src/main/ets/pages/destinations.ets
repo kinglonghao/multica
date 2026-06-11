@@ -28,6 +28,8 @@ import { ProfilePage } from './ProfilePage';
 import { NotificationsPage } from './NotificationsPage';
 import { AgentsPage } from './AgentsPage';
 import { ChatDetailPage } from './ChatDetailPage';
+import { IssueStatusPickerPage } from './IssueStatusPickerPage';
+import { IssuePriorityPickerPage } from './IssuePriorityPickerPage';
 
 function readString(param: object | undefined, key: string, fallback: string): string {
   if (param === undefined) return fallback;
@@ -68,5 +70,9 @@ export function PageDestinations(name: string, param: object): void {
     AgentsPage();
   } else if (name === 'ChatDetailPage') {
     ChatDetailPage({ id: readString(param, 'id', '') });
+  } else if (name === 'IssueStatusPickerPage') {
+    IssueStatusPickerPage({ id: readString(param, 'id', '') });
+  } else if (name === 'IssuePriorityPickerPage') {
+    IssuePriorityPickerPage({ id: readString(param, 'id', '') });
   }
 }
