@@ -2,7 +2,7 @@ import { api } from '../data/api';
 import { queryClient } from '../queries/cache';
 import { workspaceStore } from '../data/workspace';
 import { Preferences } from '../data/preferences';
-import { issueDetailKey, issueListKey } from '../queries/issue';
+import { issueDetailKey } from '../queries/issue';
 import { Comment, Issue, IssueReaction, UpdateIssueRequest } from '../models/types';
 import { runOptimistic, mutateDetail } from './optimistic';
 
@@ -134,25 +134,54 @@ export async function createComment(issueId: string, body: string): Promise<Comm
 /**
  * updateComment — edits the comment in place. The local cache
  * flips the body and the `edited` flag synchronously; the server
- * response overwrites both on success.
+ * response overwrites the edited row on success.
+ *
+ * Returns the post-update Comment (not the full list) so the
+ * caller can update its local pointer without rescanning the
+ * cache. The list cache is patched by walking it with the
+ * saved Comment.
  */
 export async function updateComment(issueId: string, commentId: string, body: string): Promise<Comment> {
   const key = commentsKey(issueId);
-  return mutateDetail<Comment[]>(
-    key,
-    (prev) => {
-      if (!prev) return prev;
-      return prev.map(c =>
+  let priorComment: Comment | null = null;
+  const result = await runOptimistic<unknown, Comment, Comment[]>({
+    keys: [key],
+    apply: () => {
+      const prior = queryClient.get<Comment[]>(key)?.data ?? [];
+      const target = prior.find(c => c.id === commentId) ?? null;
+      priorComment = target;
+      queryClient.setQueryData<Comment[]>(key, prior.map(c =>
         c.id === commentId
           ? { ...c, body, edited: true, updated_at: new Date().toISOString() }
           : c
-      );
+      ));
+      return prior;
     },
-    () => api.updateComment(commentId, body)
-  ).then(async (saved) => {
-    // mutateDetail returned the list; the caller wants the comment.
-    return saved;
+    request: () => api.updateComment(commentId, body),
+    rollback: (prior) => {
+      queryClient.setQueryData<Comment[]>(key, prior);
+    },
+    onSuccess: (saved) => {
+      queryClient.setQueryData<Comment[]>(key, (prev) => {
+        const list = prev ?? [];
+        // Replace the row if present; if a concurrent invalidate
+        // already replaced the list, the saved comment is still
+        // dropped into the list by id.
+        const idx = list.findIndex(c => c.id === saved.id);
+        if (idx < 0) {
+          return [...list, saved];
+        }
+        return list.map(c => (c.id === saved.id ? saved : c));
+      });
+    }
   });
+  if (result.rolledBack) {
+    throw new Error('Update comment failed and was rolled back');
+  }
+  if (result.response === undefined) {
+    throw new Error('Update comment aborted');
+  }
+  return result.response;
 }
 
 /**
@@ -190,47 +219,74 @@ export async function deleteComment(issueId: string, commentId: string): Promise
  * so a future refactor of the request shell (e.g. adding a
  * retry-on-401 hook) would have silently skipped this endpoint.
  *
- * The reaction shape mirrors a small iOS parity: each
- * `(emoji, didAdd)` pair becomes a single API call. For the
- * M2 surface we send `add: true` (the v0.1 endpoint is
- * `POST /api/comments/:id/reactions` with `{ emoji }` — the
- * server toggles; absence of a matching reaction adds it).
+ * Returns the server's saved `IssueReaction` so the caller can
+ * reconcile local state with the canonical id / created_at
+ * without re-fetching.
  *
- * The cache is patched in place: a matching reaction on the
- * comment's `reactions` array gets a `count++` and the current
- * user's id is added to `user_ids`; on rollback the snapshot
- * is restored.
+ * Cache shape: `Comment.reactions` is a flat list of one
+ * `IssueReaction` per (comment, emoji, user) tuple. There is no
+ * `count` aggregate — every user gets their own row. The
+ * optimistic patch therefore appends a fresh temp row for the
+ * current user; on success the server's row (with real id and
+ * `created_at`) replaces the temp row, and on rollback the
+ * prior list is restored. If the server later toggles the
+ * reaction off (the API is "fire-and-toggle" — same emoji
+ * twice removes the user's row), the post-settle refetch
+ * driven by the timeline WS event will reconcile.
  */
 export async function reactToComment(issueId: string, commentId: string, emoji: string): Promise<IssueReaction> {
   const key = commentsKey(issueId);
-  return mutateDetail<Comment[]>(
-    key,
-    (prev) => {
-      if (!prev) return prev;
-      return prev.map(c => {
+  const userId = Preferences.get('userId') ?? '';
+  const tempId = `temp-reaction-${Date.now()}`;
+  const result = await runOptimistic<unknown, IssueReaction, Comment[]>({
+    keys: [key],
+    apply: () => {
+      const prior = queryClient.get<Comment[]>(key)?.data ?? [];
+      queryClient.setQueryData<Comment[]>(key, prior.map(c => {
         if (c.id !== commentId) return c;
-        const existing = c.reactions.find(r => r.emoji === emoji);
-        if (existing) {
+        const list = c.reactions ?? [];
+        const temp: IssueReaction = {
+          id: tempId,
+          comment_id: commentId,
+          emoji,
+          user_id: userId,
+          user_name: Preferences.get('userDisplay'),
+          created_at: new Date().toISOString()
+        };
+        return { ...c, reactions: [...list, temp] };
+      }));
+      return prior;
+    },
+    request: () => api.reactToComment(commentId, emoji),
+    rollback: (prior) => {
+      queryClient.setQueryData<Comment[]>(key, prior);
+    },
+    onSuccess: (saved) => {
+      queryClient.setQueryData<Comment[]>(key, (prev) => {
+        const list = prev ?? [];
+        return list.map(c => {
+          if (c.id !== commentId) return c;
+          const rows = c.reactions ?? [];
+          // Replace the temp row with the server's record. If a
+          // concurrent edit dropped the temp row, append the
+          // server row so the optimistic intent isn't lost.
+          const idx = rows.findIndex(r => r.id === tempId);
+          if (idx < 0) {
+            return { ...c, reactions: [...rows, saved] };
+          }
           return {
             ...c,
-            reactions: c.reactions.map(r =>
-              r.emoji === emoji ? { ...r, count: r.count + 1 } : r
-            )
+            reactions: rows.map(r => (r.id === tempId ? saved : r))
           };
-        }
-        return {
-          ...c,
-          reactions: [...c.reactions, { emoji, count: 1, user_ids: [Preferences.get('userId') ?? ''] }]
-        };
+        });
       });
-    },
-    () => api.reactToComment(commentId, emoji)
-  ).then(async () => {
-    // The caller wants the reaction record, not the comments list.
-    // mutateDetail returns the list because the optimistic patch
-    // was applied to it; the API returns the new reaction. We
-    // re-fetch the saved reaction here so the contract matches
-    // the original v0.1 shape.
-    return { emoji, comment_id: commentId, user_id: Preferences.get('userId') ?? '', created_at: new Date().toISOString() } as IssueReaction;
+    }
   });
+  if (result.rolledBack) {
+    throw new Error('React to comment failed and was rolled back');
+  }
+  if (result.response === undefined) {
+    throw new Error('React to comment aborted');
+  }
+  return result.response;
 }
