@@ -43,6 +43,7 @@
  */
 
 import { ApiError } from '../data/api';
+import { getStorageAdapter, PersistedState } from './storage-adapter';
 
 export interface QueryState<T> {
   data: T | undefined;
@@ -146,6 +147,14 @@ class QueryClient {
       entry.staleTimeMs = options.staleTimeMs;
     }
 
+    // Eagerly seed from disk so a cold-launched app can render
+    // the cached list before the first network round-trip
+    // completes. The hydrate is fire-and-forget — when it
+    // resolves we patch the entry (if it hasn't been replaced by
+    // an in-flight fetch) and notify observers so the page
+    // re-renders with the warm cache.
+    this.hydrateFromStorage(stringKey, entry);
+
     // Each call to subscribe adds its own observer so the page that
     // owns this subscription gets a notification on every state change.
     const observer = (): void => {
@@ -186,6 +195,7 @@ class QueryClient {
           };
           e.inflight = null;
           this.notify(stringKey);
+          this.persistSnapshot();
           return data;
         })
         .catch((err: Error) => {
@@ -266,6 +276,7 @@ class QueryClient {
         observers: new Set()
       });
     }
+    this.persistSnapshot();
   }
 
   invalidate(key: QueryKey): void {
@@ -294,6 +305,66 @@ class QueryClient {
       entry.controller?.abort();
     }
     this.entries.clear();
+    // Also wipe disk — `clear()` is the nuclear option used on
+    // sign-out, and we don't want a re-login to rehydrate stale
+    // workspace data.
+    getStorageAdapter().clear().catch(() => { /* noop */ });
+  }
+
+  /**
+   * Eagerly seed an entry from the persistent storage adapter.
+   * Fires-and-forgets the disk read; on resolution the entry is
+   * patched (if still present) and observers are notified.
+   *
+   * We never block the in-memory path on disk — a slow disk read
+   * is the worst case we want to avoid, and the adapter already
+   * has its own try/catch around JSON.parse. The fetch that
+   * `subscribe` kicks off in parallel may complete first; if so,
+   * the hydrate is a no-op (we skip patching when the in-memory
+   * entry has been updated more recently than the disk record).
+   */
+  private hydrateFromStorage(stringKey: string, entry: EntryRecord): void {
+    const adapter = getStorageAdapter();
+    adapter.load<unknown>(stringKey).then((persisted) => {
+      if (!persisted) return;
+      const cur = this.entries.get(stringKey);
+      if (!cur) return;
+      // Don't overwrite a fresher in-memory value.
+      const inMemFresh = cur.state.updatedAt !== null &&
+        (persisted.updatedAt === null || cur.state.updatedAt >= persisted.updatedAt);
+      if (inMemFresh) return;
+      cur.state = {
+        data: persisted.data,
+        error: null,
+        isLoading: false,
+        isRefetching: false,
+        updatedAt: persisted.updatedAt
+      };
+      this.notify(stringKey);
+    }).catch(() => { /* noop */ });
+  }
+
+  /**
+   * Persist the current in-memory cache snapshot to the storage
+   * adapter. Called on every successful fetch and every
+   * `setQueryData` write. The adapter owns debouncing — we
+   * build a fresh snapshot each time so a stale-write race
+   * can't drop the latest state.
+   */
+  private persistSnapshot(): void {
+    const snapshot = new Map<string, PersistedState<unknown>>();
+    for (const [k, e] of this.entries.entries()) {
+      // Only persist settled entries (have data + updatedAt).
+      // Entries still in `isLoading` or that have only ever
+      // errored are skipped — the next successful fetch will
+      // repopulate them.
+      if (e.state.updatedAt === null) continue;
+      snapshot.set(k, {
+        data: e.state.data,
+        updatedAt: e.state.updatedAt
+      });
+    }
+    getStorageAdapter().saveAll(snapshot);
   }
 
   private notify(stringKey: string): void {

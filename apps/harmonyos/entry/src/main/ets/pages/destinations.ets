@@ -30,6 +30,15 @@ import { AgentsPage } from './AgentsPage';
 import { ChatDetailPage } from './ChatDetailPage';
 import { IssueStatusPickerPage } from './IssueStatusPickerPage';
 import { IssuePriorityPickerPage } from './IssuePriorityPickerPage';
+import { IssueRunsPage } from './IssueRunsPage';
+import { IssueEditPage } from './IssueEditPage';
+import { IssueAssigneePickerPage } from './IssueAssigneePickerPage';
+import { IssueProjectPickerPage } from './IssueProjectPickerPage';
+import { ProjectEditPage } from './ProjectEditPage';
+import { ProjectStatusPickerPage } from './ProjectStatusPickerPage';
+import { ProjectPriorityPickerPage } from './ProjectPriorityPickerPage';
+import { ProjectLeadPickerPage } from './ProjectLeadPickerPage';
+import { AddProjectResourcePage } from './AddProjectResourcePage';
 
 function readString(param: object | undefined, key: string, fallback: string): string {
   if (param === undefined) return fallback;
@@ -74,5 +83,23 @@ export function PageDestinations(name: string, param: object): void {
     IssueStatusPickerPage({ id: readString(param, 'id', '') });
   } else if (name === 'IssuePriorityPickerPage') {
     IssuePriorityPickerPage({ id: readString(param, 'id', '') });
+  } else if (name === 'IssueRunsPage') {
+    IssueRunsPage({ id: readString(param, 'id', '') });
+  } else if (name === 'IssueEditPage') {
+    IssueEditPage({ id: readString(param, 'id', '') });
+  } else if (name === 'IssueAssigneePickerPage') {
+    IssueAssigneePickerPage({ id: readString(param, 'id', '') });
+  } else if (name === 'IssueProjectPickerPage') {
+    IssueProjectPickerPage({ id: readString(param, 'id', '') });
+  } else if (name === 'ProjectEditPage') {
+    ProjectEditPage({ id: readString(param, 'id', '') });
+  } else if (name === 'ProjectStatusPickerPage') {
+    ProjectStatusPickerPage({ id: readString(param, 'id', '') });
+  } else if (name === 'ProjectPriorityPickerPage') {
+    ProjectPriorityPickerPage({ id: readString(param, 'id', '') });
+  } else if (name === 'ProjectLeadPickerPage') {
+    ProjectLeadPickerPage({ id: readString(param, 'id', '') });
+  } else if (name === 'AddProjectResourcePage') {
+    AddProjectResourcePage({ id: readString(param, 'id', '') });
   }
 }

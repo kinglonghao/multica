@@ -118,7 +118,8 @@ export struct IssueDetailPage {
       Header({
         title: this.id ? 'Issue' : 'Loading…',
         scheme: this.scheme,
-        left: this.BackButton()
+        left: this.BackButton(),
+        right: this.ActionsMenu()
       })
 
       if (!this.id) {
@@ -144,6 +145,22 @@ export struct IssueDetailPage {
       scheme: this.scheme,
       accessibilityLabel: 'Back',
       onTap: () => { appNavigation.pop(); }
+    })
+  }
+
+  /**
+   * Header right action — a single button that opens the issue
+   * edit page. The issue runs and assign actions live on the
+   * edit page too; the issue header stays uncluttered. (M3
+   * iOS parity: `apps/mobile/app/(app)/[workspace]/issues/[id]/
+   * _components/HeaderActions.tsx`.)
+   */
+  @Builder ActionsMenu() {
+    IconButton({
+      glyph: '✎',
+      scheme: this.scheme,
+      accessibilityLabel: 'Edit issue',
+      onTap: () => { if (this.id) appNavigation.pushName('IssueEditPage', { id: this.id }); }
     })
   }
 
@@ -216,9 +233,61 @@ export struct IssueDetailPage {
             color: 'foreground'
           })
             .margin({ left: SPACE['2'] })
+          Blank()
+          MulticaText({
+            value: 'Change',
+            scheme: this.scheme,
+            size: 'sm',
+            weight: 'medium',
+            color: 'brand'
+          })
         }
         .margin({ top: SPACE['3'] })
+        .width('100%')
+        .onClick(() => { if (this.id) appNavigation.pushName('IssueAssigneePickerPage', { id: this.id }); })
+      } else {
+        Row() {
+          MulticaText({
+            value: 'Assign to…',
+            scheme: this.scheme,
+            size: 'sm',
+            weight: 'medium',
+            color: 'brand'
+          })
+        }
+        .padding({ top: SPACE['2'], bottom: SPACE['2'] })
+        .onClick(() => { if (this.id) appNavigation.pushName('IssueAssigneePickerPage', { id: this.id }); })
       }
+
+      // "View agent runs" — only meaningful when an agent is
+      // assigned, but the runs tab is also useful for the
+      // historical view even after the run has completed. We
+      // always render the link so the user has a stable path
+      // to the runs surface; the runs page renders its own
+      // empty state on a fresh issue.
+      Row() {
+        MulticaText({
+          value: 'View agent runs',
+          scheme: this.scheme,
+          size: 'sm',
+          weight: 'medium',
+          color: 'brand'
+        })
+        Blank()
+        MulticaText({
+          value: '›',
+          scheme: this.scheme,
+          size: 'sm',
+          color: 'mutedForeground'
+        })
+      }
+      .width('100%')
+      .padding({ top: SPACE['3'], bottom: SPACE['3'] })
+      .border({
+        width: { top: 1, bottom: 1 },
+        color: String(THEME[this.scheme].border)
+      })
+      .onClick(() => { if (this.id) appNavigation.pushName('IssueRunsPage', { id: this.id }); })
 
       MulticaText({
         value: `Created ${timeAgo(issue.created_at)} · Updated ${timeAgo(issue.updated_at)}`,

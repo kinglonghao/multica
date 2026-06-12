@@ -4,7 +4,12 @@ import window from '@ohos.window';
 import AbilityConstant from '@ohos.app.ability.AbilityConstant';
 import Want from '@ohos.app.ability.Want';
 import { BusinessError } from '@ohos.base';
-import { PreferencesBootstrap } from '../data/preferences';
+import { Preferences, PreferencesBootstrap } from '../data/preferences';
+import { realtimeLifecycle } from '../realtime/lifecycle';
+import {
+  setStorageAdapter,
+  createWorkspaceCacheStorageAdapter
+} from '../queries/storage-adapter';
 
 const DOMAIN = 0x0000;
 const TAG = 'EntryAbility';
@@ -40,6 +45,23 @@ export default class EntryAbility extends UIAbility {
       hilog.error(DOMAIN, TAG, 'preferences init failed: %{public}s', JSON.stringify(err));
     }
 
+    // Mount the persistent cache storage adapter. We only wire
+    // the disk-backed adapter when the user is already in a
+    // workspace — otherwise the noop adapter is the safe default
+    // and sign-in will swap it in via the auth flow. Boot the
+    // realtime lifecycle in parallel (it's a noop without a
+    // workspace token).
+    try {
+      const wsId = Preferences.get('workspaceId');
+      if (wsId) {
+        const adapter = await createWorkspaceCacheStorageAdapter(this.context, wsId);
+        await setStorageAdapter(adapter);
+      }
+    } catch (err) {
+      hilog.warn(DOMAIN, TAG, 'cache storage init failed: %{public}s', JSON.stringify(err));
+    }
+    realtimeLifecycle.boot();
+
     windowStage.loadContent('pages/Index', (err: BusinessError) => {
       if (err.code) {
         hilog.error(DOMAIN, TAG, 'Failed to load Index. Cause: %{public}s', JSON.stringify(err));
@@ -66,9 +88,11 @@ export default class EntryAbility extends UIAbility {
 
   onForeground(): void {
     hilog.info(DOMAIN, TAG, '%{public}s', 'Ability onForeground');
+    realtimeLifecycle.onAppForeground();
   }
 
   onBackground(): void {
     hilog.info(DOMAIN, TAG, '%{public}s', 'Ability onBackground');
+    realtimeLifecycle.onAppBackground();
   }
 };

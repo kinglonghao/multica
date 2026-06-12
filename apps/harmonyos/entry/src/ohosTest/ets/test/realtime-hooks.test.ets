@@ -17,9 +17,16 @@ import {
   useInboxRealtime,
   useProjectRealtime,
   useChatRealtime,
-  usePresenceRealtime
+  usePresenceRealtime,
+  useTaskRealtime,
+  useLabelRealtime,
+  useMemberRealtime,
+  useSquadRealtime,
+  useRuntimeRealtime,
+  usePinRealtime,
+  useChatSessionsRealtime
 } from '../../../../main/ets/realtime/realtime-hooks';
-import { Issue, Project, InboxItem } from '../../../../main/ets/models/types';
+import { AgentTask, Issue, Project, InboxItem } from '../../../../main/ets/models/types';
 
 const mkIssue = (overrides: Partial<Issue>): Issue => ({
   id: 'iss-1', number: 1, identifier: 'MUL-1', title: 't', description: '',
@@ -172,6 +179,93 @@ export default function realtimeHooksTest(): void {
       fireEvent('presence:update', { agent_id: 'agent-1', status: 'busy' });
       const after = queryClient.get<{ status: string }>(['agent-presence', 'agent-1']);
       expect(after?.data?.status).assertEqual('busy');
+      unsub();
+    });
+  });
+
+  describe('useTaskRealtime (per-issue scope)', () => {
+    it('upserts a task on task:running for the scoped issue', () => {
+      queryClient.setQueryData<AgentTask[]>(['issue-runs', 'ws-1', 'iss-1'], []);
+      const unsub = useTaskRealtime({ issueId: 'iss-1' });
+      fireEvent('task:running', {
+        id: 'task-1', agent_id: 'agent-1', workspace_id: 'ws-1', status: 'running',
+        prompt: 'p', started_at: '2026-06-09T00:00:00Z', issue_id: 'iss-1'
+      });
+      const after = queryClient.get<AgentTask[]>(['issue-runs', 'ws-1', 'iss-1']);
+      expect(after?.data?.length).assertEqual(1);
+      expect(after?.data?.[0]?.id).assertEqual('task-1');
+      unsub();
+    });
+
+    it('ignores tasks that do not carry the scoped issue_id', () => {
+      queryClient.setQueryData<AgentTask[]>(['issue-runs', 'ws-1', 'iss-1'], []);
+      const unsub = useTaskRealtime({ issueId: 'iss-1' });
+      fireEvent('task:running', {
+        id: 'task-1', agent_id: 'agent-1', workspace_id: 'ws-1', status: 'running',
+        prompt: 'p', started_at: '2026-06-09T00:00:00Z', issue_id: 'iss-2'
+      });
+      const after = queryClient.get<AgentTask[]>(['issue-runs', 'ws-1', 'iss-1']);
+      expect(after?.data?.length).assertEqual(0);
+      unsub();
+    });
+  });
+
+  describe('useLabelRealtime', () => {
+    it('invalidates the label list on label:created', () => {
+      queryClient.setQueryData<unknown[]>(['labels', 'ws-1'], [{ id: 'l-1' }]);
+      const unsub = useLabelRealtime();
+      fireEvent('label:created', { id: 'l-2' });
+      expect(queryClient.get<unknown[]>(['labels', 'ws-1'])).assertEqual(undefined);
+      unsub();
+    });
+  });
+
+  describe('useMemberRealtime', () => {
+    it('invalidates the member list on member:added', () => {
+      queryClient.setQueryData<unknown[]>(['members', 'ws-1'], [{ user_id: 'u-1' }]);
+      const unsub = useMemberRealtime();
+      fireEvent('member:added', { user_id: 'u-2' });
+      expect(queryClient.get<unknown[]>(['members', 'ws-1'])).assertEqual(undefined);
+      unsub();
+    });
+  });
+
+  describe('useSquadRealtime', () => {
+    it('invalidates the squad list on squad:created', () => {
+      queryClient.setQueryData<unknown[]>(['squads', 'ws-1'], [{ id: 'sq-1' }]);
+      const unsub = useSquadRealtime();
+      fireEvent('squad:created', { id: 'sq-2' });
+      expect(queryClient.get<unknown[]>(['squads', 'ws-1'])).assertEqual(undefined);
+      unsub();
+    });
+  });
+
+  describe('useRuntimeRealtime', () => {
+    it('invalidates the runtime list on daemon:register', () => {
+      queryClient.setQueryData<unknown[]>(['runtimes', 'ws-1'], [{ id: 'rt-1' }]);
+      const unsub = useRuntimeRealtime();
+      fireEvent('daemon:register', { device_id: 'rt-2' });
+      expect(queryClient.get<unknown[]>(['runtimes', 'ws-1'])).assertEqual(undefined);
+      unsub();
+    });
+  });
+
+  describe('usePinRealtime', () => {
+    it('invalidates the pin list on pin:created', () => {
+      queryClient.setQueryData<unknown[]>(['pins', 'ws-1', 'u-1'], [{ id: 'p-1' }]);
+      const unsub = usePinRealtime();
+      fireEvent('pin:created', { id: 'p-2' });
+      expect(queryClient.get<unknown[]>(['pins', 'ws-1', 'u-1'])).assertEqual(undefined);
+      unsub();
+    });
+  });
+
+  describe('useChatSessionsRealtime', () => {
+    it('invalidates the chat sessions list on chat:done', () => {
+      queryClient.setQueryData<unknown[]>(['chat', 'ws-1', 'sessions'], [{ id: 's-1' }]);
+      const unsub = useChatSessionsRealtime();
+      fireEvent('chat:done', { session_id: 's-1' });
+      expect(queryClient.get<unknown[]>(['chat', 'ws-1', 'sessions'])).assertEqual(undefined);
       unsub();
     });
   });

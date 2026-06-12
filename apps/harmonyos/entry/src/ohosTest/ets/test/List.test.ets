@@ -15,6 +15,11 @@ import realtimeHooksTest from './realtime-hooks.test';
 import pinMutationsTest from './pin-mutations.test';
 import parseResponseTest from './parse-response.test';
 import realtimeContractTest from './realtime-contract.test';
+import formatUtilsTest from './format-utils.test';
+import issueMutationsTest from './issue-mutations.test';
+import optimisticTest from './optimistic.test';
+import markdownTest from './markdown.test';
+import storageAdapterTest from './storage-adapter.test';
 
 export default function testsuite(): void {
   inboxDisplayTest();
@@ -28,4 +33,9 @@ export default function testsuite(): void {
   pinMutationsTest();
   parseResponseTest();
   realtimeContractTest();
+  formatUtilsTest();
+  issueMutationsTest();
+  optimisticTest();
+  markdownTest();
+  storageAdapterTest();
 }

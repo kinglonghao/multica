@@ -496,6 +496,34 @@ class ApiClient {
     });
   }
 
+  /**
+   * "Runs" for an issue — the agent tasks spawned by actions on the
+   * issue (assign-to-agent, dispatch, etc.). Same shape as
+   * `listAgentTasks`, filtered server-side to the issue. The
+   * endpoint was added in M3 — a 404 (older server) falls back to
+   * an empty list so the page renders the empty state instead of
+   * crashing the issue detail.
+   */
+  async listIssueRuns(issueId: string, opts?: RequestOpts): Promise<AgentTask[]> {
+    try {
+      const raw = await this.request<unknown>(
+        'GET',
+        `/api/issues/${issueId}/runs`,
+        undefined,
+        opts
+      );
+      return parseWithFallback(raw, AgentTaskListSchema, EMPTY_AGENT_TASK_LIST, {
+        endpoint: 'GET /api/issues/:id/runs'
+      });
+    } catch (err) {
+      // 404 is expected on older servers — fall back to empty.
+      if (err instanceof ApiError && err.status === 404) {
+        return [] as AgentTask[];
+      }
+      throw err;
+    }
+  }
+
   // -------- Members --------
 
   async listMembers(opts?: RequestOpts): Promise<MemberWithUser[]> {
