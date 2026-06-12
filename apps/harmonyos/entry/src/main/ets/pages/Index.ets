@@ -2,6 +2,8 @@ import { appNavigation } from '../data/navigation';
 import { authStore } from '../data/auth';
 import { workspaceStore } from '../data/workspace';
 import { THEME, ColorScheme } from '../lib/theme';
+import { themeController } from '../lib/theme-controller';
+import { localeController } from '../lib/locale';
 import { MulticaText } from '../components/ui/Text';
 import { WorkspaceLayout } from './WorkspaceLayout';
 import { PageDestinations } from './destinations';
@@ -31,10 +33,20 @@ import { PageDestinations } from './destinations';
 @ComponentV2
 struct Index {
   @Local scheme: ColorScheme = 'light';
+  @Local localeVersion: number = 0;
+  private themeUnsub?: () => void;
+  private localeUnsub?: () => void;
 
   aboutToAppear(): void {
-    this.scheme = this.detectScheme();
+    this.scheme = themeController.scheme;
+    this.themeUnsub = themeController.subscribe((s) => { this.scheme = s; });
+    this.localeUnsub = localeController.subscribe(() => { this.localeVersion++; });
     void this.boot();
+  }
+
+  aboutToDisappear(): void {
+    this.themeUnsub?.();
+    this.localeUnsub?.();
   }
 
   private async boot(): Promise<void> {
@@ -50,10 +62,6 @@ struct Index {
     }
   }
 
-  private detectScheme(): ColorScheme {
-    return 'light';
-  }
-
   build() {
     Navigation(appNavigation.stack) {
       // Always WorkspaceLayout. The shell handles its own splash
@@ -65,5 +73,6 @@ struct Index {
     .mode(NavigationMode.Stack)
     .hideTitleBar(true)
     .navDestination(PageDestinations)
+    .backgroundColor(String(THEME[this.scheme].background))
   }
 }

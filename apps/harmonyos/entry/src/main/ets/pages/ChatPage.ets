@@ -4,20 +4,27 @@ import { workspaceStore } from '../data/workspace';
 import { useQuery, QueryHandle } from '../queries/cache';
 import { ChatSession } from '../models/types';
 import { THEME, ColorScheme, SPACE } from '../lib/theme';
+import { themeController } from '../lib/theme-controller';
+import { localeController, t } from '../lib/locale';
 import { timeAgo } from '../lib/utils';
 import { MulticaText } from '../components/ui/Text';
 import { Header } from '../components/ui/Header';
 import { Avatar } from '../components/ui/Avatar';
 import { Skeleton } from '../components/ui/Skeleton';
+import { ChatEmptyState } from '../components/chat/ChatEmptyState';
 
 @ComponentV2
 export struct ChatPage {
   @Local scheme: ColorScheme = 'light';
   @Local version: number = 0;
   private query: QueryHandle<ChatSession[]> | null = null;
+  private themeUnsub?: () => void;
+  private localeUnsub?: () => void;
 
   aboutToAppear(): void {
-    this.scheme = this.detectScheme();
+    this.scheme = themeController.scheme;
+    this.themeUnsub = themeController.subscribe((s) => { this.scheme = s; });
+    this.localeUnsub = localeController.subscribe(() => { this.version++; });
     const wsId = workspaceStore.currentId;
     this.query = useQuery<ChatSession[]>(
       ['chat-sessions', wsId],
@@ -28,15 +35,17 @@ export struct ChatPage {
 
   aboutToDisappear(): void {
     this.query?.unsubscribe();
-  }
-
-  private detectScheme(): ColorScheme {
-    return 'light';
+    this.themeUnsub?.();
+    this.localeUnsub?.();
   }
 
   build() {
     Column() {
-      Header({ title: 'Chat', scheme: this.scheme })
+      Header({
+        title: t('chat_title'),
+        scheme: this.scheme,
+        right: this.NewChatButton()
+      })
 
       if (!this.query) {
         return;
@@ -62,17 +71,12 @@ export struct ChatPage {
       } else {
         const sessions = state.data ?? [];
         if (sessions.length === 0) {
-          Stack({ alignContent: Alignment.Center }) {
-            MulticaText({
-              value: 'No chat sessions yet',
-              scheme: this.scheme,
-              size: 'sm',
-              color: 'mutedForeground',
-              textAlign: TextAlign.Center
-            })
-          }
-          .layoutWeight(1)
-          .width('100%')
+          ChatEmptyState({
+            scheme: this.scheme,
+            title: t('chat_empty'),
+            description: t('chat_no_messages'),
+            action: this.NewChatAction()
+          })
         } else {
           List({ space: 0 }) {
             ForEach(sessions, (session) => {
@@ -134,5 +138,36 @@ export struct ChatPage {
     .width('100%')
     .height('100%')
     .backgroundColor(String(THEME[this.scheme].background))
+  }
+
+  @Builder NewChatButton() {
+    MulticaText({
+      value: '+',
+      scheme: this.scheme,
+      size: 'xl',
+      weight: 'bold',
+      color: 'brand'
+    })
+      .width(40)
+      .height(40)
+      .borderRadius(20)
+      .backgroundColor('transparent')
+      .textAlign(TextAlign.Center)
+      .onClick(() => { appNavigation.pushName('NewChatPage'); })
+      .accessibilityText(t('chat_new_chat'))
+  }
+
+  @Builder NewChatAction() {
+    MulticaText({
+      value: t('chat_new_chat'),
+      scheme: this.scheme,
+      size: 'base',
+      weight: 'medium',
+      color: 'brandForeground'
+    })
+      .padding({ left: SPACE['4'], right: SPACE['4'], top: SPACE['2'], bottom: SPACE['2'] })
+      .borderRadius(8)
+      .backgroundColor(String(THEME[this.scheme].brand))
+      .onClick(() => { appNavigation.pushName('NewChatPage'); })
   }
 }

@@ -28,6 +28,8 @@ import { ProfilePage } from './ProfilePage';
 import { NotificationsPage } from './NotificationsPage';
 import { AgentsPage } from './AgentsPage';
 import { ChatDetailPage } from './ChatDetailPage';
+import { SettingsPage } from './SettingsPage';
+import { NewChatPage } from './NewChatPage';
 
 function readString(param: object | undefined, key: string, fallback: string): string {
   if (param === undefined) return fallback;
@@ -68,5 +70,9 @@ export function PageDestinations(name: string, param: object): void {
     AgentsPage();
   } else if (name === 'ChatDetailPage') {
     ChatDetailPage({ id: readString(param, 'id', '') });
+  } else if (name === 'SettingsPage') {
+    SettingsPage();
+  } else if (name === 'NewChatPage') {
+    NewChatPage();
   }
 }

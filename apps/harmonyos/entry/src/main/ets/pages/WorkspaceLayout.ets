@@ -3,6 +3,8 @@ import { globalEvents } from '../data/auth';
 import { workspaceStore } from '../data/workspace';
 import { wsClient } from '../realtime/ws-client';
 import { THEME, ColorScheme, SPACE, textColor, TextColorKey } from '../lib/theme';
+import { themeController } from '../lib/theme-controller';
+import { localeController, t } from '../lib/locale';
 import { MulticaText } from '../components/ui/Text';
 import { Skeleton } from '../components/ui/Skeleton';
 import { InboxPage } from './InboxPage';
@@ -15,11 +17,16 @@ export struct WorkspaceLayout {
   @Local activeTab: number = 0;
   @Local scheme: ColorScheme = 'light';
   @Local bootstrapping: boolean = true;
+  @Local localeVersion: number = 0;
   private authUnsub?: () => void;
   private wsUnsub?: () => void;
+  private themeUnsub?: () => void;
+  private localeUnsub?: () => void;
 
   aboutToAppear(): void {
-    this.scheme = this.detectScheme();
+    this.scheme = themeController.scheme;
+    this.themeUnsub = themeController.subscribe((s) => { this.scheme = s; });
+    this.localeUnsub = localeController.subscribe(() => { this.localeVersion++; });
     this.authUnsub = globalEvents.on('auth:required', () => {
       appNavigation.clearStack();
       appNavigation.pushName('LoginPage');
@@ -43,6 +50,8 @@ export struct WorkspaceLayout {
   aboutToDisappear(): void {
     this.authUnsub?.();
     this.wsUnsub?.();
+    this.themeUnsub?.();
+    this.localeUnsub?.();
     // Disconnect the WS on leave so a forced sign-out (auth:required)
     // doesn't leave the socket connected and continuing to receive
     // events for a workspace the user no longer has access to.
@@ -50,10 +59,6 @@ export struct WorkspaceLayout {
     // meant the socket could outlive the auth session and silently
     // fail the 401 path on every reconnect.
     wsClient.disconnect();
-  }
-
-  private detectScheme(): ColorScheme {
-    return 'light';
   }
 
   private bootRealtime(): void {
@@ -119,10 +124,10 @@ export struct WorkspaceLayout {
 
   @Builder TabBar() {
     Row() {
-      this.TabButton(0, $r('app.string.nav_inbox'), $r('sys.symbol.tray_fill'))
-      this.TabButton(1, $r('app.string.nav_my_issues'), $r('sys.symbol.checkmark_square'))
-      this.TabButton(2, $r('app.string.nav_chat'), $r('sys.symbol.bubble_left_fill'))
-      this.TabButton(3, $r('app.string.nav_more'), $r('sys.symbol.line_3_horizontal'))
+      this.TabButton(0, t('tab_inbox'), $r('sys.symbol.tray_fill'))
+      this.TabButton(1, t('tab_my_issues'), $r('sys.symbol.checkmark_square'))
+      this.TabButton(2, t('tab_chat'), $r('sys.symbol.bubble_left_fill'))
+      this.TabButton(3, t('tab_more'), $r('sys.symbol.line_3_horizontal'))
     }
     .width('100%')
     .height(56)
@@ -133,13 +138,13 @@ export struct WorkspaceLayout {
     })
   }
 
-  @Builder TabButton(index: number, label: Resource, glyph: Resource) {
+  @Builder TabButton(index: number, label: string, glyph: Resource) {
     Column() {
       SymbolGlyph(glyph)
         .fontSize(20)
         .fontColor([textColor(this.scheme, this.tabColorKey(index))])
       MulticaText({
-        value: this.resolveLabel(label),
+        value: label,
         scheme: this.scheme,
         size: 'xs',
         color: this.tabColorKey(index)
@@ -161,17 +166,5 @@ export struct WorkspaceLayout {
    */
   private tabColorKey(index: number): TextColorKey {
     return this.activeTab === index ? 'foreground' : 'mutedForeground';
-  }
-
-  /**
-   * Resolve a `Resource` to its string form via the resource manager.
-   * Replaces the v0.2 `as unknown as string` double cast (C-5).
-   */
-  private resolveLabel(r: Resource): string {
-    try {
-      return getContext(this).resourceManager.getStringSync(r);
-    } catch {
-      return '';
-    }
   }
 }

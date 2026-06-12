@@ -363,6 +363,43 @@ export const ChatMessageSchema: Schema<ChatMessage> = {
   }
 };
 
+// ---------- ChatSession ----------
+
+export const EMPTY_CHAT_SESSION: ChatSession = {
+  id: '',
+  workspace_id: '',
+  agent_id: null,
+  agent_name: null,
+  agent_avatar_url: null,
+  title: null,
+  last_message_at: null,
+  last_message_preview: null,
+  unread_count: 0,
+  created_at: '',
+  updated_at: ''
+};
+
+export const ChatSessionSchema: Schema<ChatSession> = {
+  validate(value: unknown): ParseResult<ChatSession> {
+    if (!isObject(value)) return fail('ChatSession: not an object');
+    const id = value['id'];
+    if (!isString(id)) return fail('ChatSession.id missing or not a string');
+    return ok({
+      id,
+      workspace_id: readField(value, 'workspace_id', isString, ''),
+      agent_id: readField(value, 'agent_id', isNullableString, null),
+      agent_name: readField(value, 'agent_name', isNullableString, null),
+      agent_avatar_url: readField(value, 'agent_avatar_url', isNullableString, null),
+      title: readField(value, 'title', isNullableString, null),
+      last_message_at: readField(value, 'last_message_at', isNullableString, null),
+      last_message_preview: readField(value, 'last_message_preview', isNullableString, null),
+      unread_count: readField(value, 'unread_count', isNumber, 0),
+      created_at: readField(value, 'created_at', isString, ''),
+      updated_at: readField(value, 'updated_at', isString, '')
+    });
+  }
+};
+
 export const EMPTY_CHAT_MESSAGE_LIST: ChatMessage[] = [];
 export const ChatMessageListSchema: Schema<ChatMessage[]> = {
   validate(value: unknown): ParseResult<ChatMessage[]> {

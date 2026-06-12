@@ -4,12 +4,17 @@ import { useQuery, QueryHandle } from '../queries/cache';
 import { useChatRealtime } from '../realtime/realtime-hooks';
 import { ChatMessage, ChatSession } from '../models/types';
 import { THEME, ColorScheme, SPACE, RADIUS } from '../lib/theme';
+import { themeController } from '../lib/theme-controller';
+import { localeController, t } from '../lib/locale';
+import { Preferences } from '../data/preferences';
 import { timeAgo } from '../lib/utils';
 import { MulticaText } from '../components/ui/Text';
 import { Header } from '../components/ui/Header';
 import { IconButton } from '../components/ui/IconButton';
 import { Avatar } from '../components/ui/Avatar';
 import { Skeleton } from '../components/ui/Skeleton';
+import { ChatComposer } from '../components/chat/ChatComposer';
+import { MessageBubble } from '../components/chat/MessageBubble';
 
 @ComponentV2
 export struct ChatDetailPage {
@@ -22,9 +27,13 @@ export struct ChatDetailPage {
   private session: QueryHandle<ChatSession> | null = null;
   private messages: QueryHandle<ChatMessage[]> | null = null;
   private wsUnsub?: () => void;
+  private themeUnsub?: () => void;
+  private localeUnsub?: () => void;
 
   aboutToAppear(): void {
-    this.scheme = this.detectScheme();
+    this.scheme = themeController.scheme;
+    this.themeUnsub = themeController.subscribe((s) => { this.scheme = s; });
+    this.localeUnsub = localeController.subscribe(() => { this.version++; });
     this.id = appNavigation.readString('ChatDetailPage', 'id', '');
     this.session = useQuery<ChatSession>(
       ['chat-session', this.id],
@@ -40,16 +49,28 @@ export struct ChatDetailPage {
     // hook patches the cache in place — incoming assistant
     // messages stream in without a refetch.
     this.wsUnsub = useChatRealtime(this.id);
+    // Restore the per-session draft from the shared preferences
+    // store. We save on every change so a kill-and-relaunch
+    // (or a quick tab-switch) preserves the in-flight text.
+    void this.restoreDraft();
   }
 
   aboutToDisappear(): void {
     this.session?.unsubscribe();
     this.messages?.unsubscribe();
     this.wsUnsub?.();
+    this.themeUnsub?.();
+    this.localeUnsub?.();
   }
 
-  private detectScheme(): ColorScheme {
-    return 'light';
+  private async restoreDraft(): Promise<void> {
+    if (!this.id) return;
+    this.inputDraft = await Preferences.getChatDraft(this.id);
+  }
+
+  private async persistDraft(value: string): Promise<void> {
+    if (!this.id) return;
+    await Preferences.setChatDraft(this.id, value);
   }
 
   private async send(): Promise<void> {
@@ -60,12 +81,13 @@ export struct ChatDetailPage {
     try {
       await api.sendChatMessage(this.id, text);
       this.inputDraft = '';
+      await this.persistDraft('');
       // Refetch on send so the user's message + the agent's
       // eventual response both land; the WS hook handles the
       // interim assistant message.
       this.messages?.refetch();
     } catch (err) {
-      this.sendError = err instanceof Error ? err.message : 'Failed to send message';
+      this.sendError = err instanceof Error ? err.message : t('chat_message_failed');
     } finally {
       this.sending = false;
     }
@@ -74,7 +96,7 @@ export struct ChatDetailPage {
   build() {
     Column() {
       Header({
-        title: this.session?.getState().data?.title ?? 'Chat',
+        title: this.session?.getState().data?.title ?? t('chat_title'),
         scheme: this.scheme,
         left: this.BackButton()
       })
@@ -93,9 +115,25 @@ export struct ChatDetailPage {
                 .margin({ top: SPACE['2'], left: SPACE['4'], right: SPACE['4'] })
             })
           } else if (mState.data) {
-            ForEach(mState.data, (msg: ChatMessage) => {
-              this.MessageRow(msg, session)
-            })
+            if (mState.data.length === 0) {
+              MulticaText({
+                value: t('chat_no_messages'),
+                scheme: this.scheme,
+                size: 'sm',
+                color: 'mutedForeground',
+                textAlign: TextAlign.Center
+              })
+                .width('100%')
+                .padding(SPACE['6'])
+            } else {
+              ForEach(mState.data, (msg: ChatMessage) => {
+                MessageBubble({
+                  message: msg,
+                  scheme: this.scheme,
+                  agentName: session?.agent_name ?? ''
+                })
+              })
+            }
           }
         }
         .width('100%')
@@ -115,30 +153,16 @@ export struct ChatDetailPage {
           .padding({ left: SPACE['4'], right: SPACE['4'], top: SPACE['1'] })
       }
 
-      Row() {
-        TextInput({ placeholder: 'Message…', text: this.inputDraft })
-          .placeholderColor(String(THEME[this.scheme].mutedForeground))
-          .fontColor(String(THEME[this.scheme].foreground))
-          .backgroundColor(String(THEME[this.scheme].card))
-          .borderRadius(RADIUS.full)
-          .padding(SPACE['3'])
-          .layoutWeight(1)
-          .onChange((value: string) => { this.inputDraft = value; })
-        MulticaText({
-          value: this.sending ? '…' : '↑',
-          scheme: this.scheme,
-          size: 'xl',
-          weight: 'bold',
-          color: 'brand'
-        })
-          .margin({ left: SPACE['3'] })
-          .onClick(() => { void this.send(); })
-      }
-      .width('100%')
-      .padding(SPACE['3'])
-      .border({
-        width: { top: 1 },
-        color: String(THEME[this.scheme].border)
+      ChatComposer({
+        value: this.inputDraft,
+        scheme: this.scheme,
+        placeholder: t('chat_composer_placeholder'),
+        sending: this.sending,
+        onChange: (v: string) => {
+          this.inputDraft = v;
+          void this.persistDraft(v);
+        },
+        onSend: () => { void this.send(); }
       })
     }
     .width('100%')
@@ -146,41 +170,11 @@ export struct ChatDetailPage {
     .backgroundColor(String(THEME[this.scheme].background))
   }
 
-  @Builder MessageRow(msg: ChatMessage, session: ChatSession | undefined) {
-    Row() {
-      if (msg.role === 'assistant') {
-        Avatar({ name: session?.agent_name ?? '·', url: session?.agent_avatar_url ?? '', size: 28, scheme: this.scheme })
-      } else {
-        Blank().width(28)
-      }
-      Column() {
-        MulticaText({
-          value: msg.content,
-          scheme: this.scheme,
-          size: 'sm',
-          color: 'foreground'
-        })
-        MulticaText({
-          value: timeAgo(msg.created_at),
-          scheme: this.scheme,
-          size: 'xs',
-          color: 'mutedForeground'
-        })
-          .margin({ top: SPACE['0.5'] })
-      }
-      .layoutWeight(1)
-      .margin({ left: SPACE['2'] })
-      .alignItems(HorizontalAlign.Start)
-    }
-    .width('100%')
-    .padding({ left: SPACE['4'], right: SPACE['4'], top: SPACE['1'], bottom: SPACE['1'] })
-  }
-
   @Builder BackButton() {
     IconButton({
       glyph: '‹',
       scheme: this.scheme,
-      accessibilityLabel: 'Back',
+      accessibilityLabel: t('common_back'),
       onTap: () => { appNavigation.pop(); }
     })
   }

@@ -15,6 +15,9 @@ import realtimeHooksTest from './realtime-hooks.test';
 import pinMutationsTest from './pin-mutations.test';
 import parseResponseTest from './parse-response.test';
 import realtimeContractTest from './realtime-contract.test';
+import themeControllerTest from './theme-controller.test';
+import localeTest from './locale.test';
+import schemasTest from './schemas.test';
 
 export default function testsuite(): void {
   inboxDisplayTest();
@@ -28,4 +31,7 @@ export default function testsuite(): void {
   pinMutationsTest();
   parseResponseTest();
   realtimeContractTest();
+  themeControllerTest();
+  localeTest();
+  schemasTest();
 }

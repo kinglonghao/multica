@@ -429,6 +429,18 @@ class ApiClient {
     return this.request<ChatSession>('GET', `/api/chat/sessions/${id}`, undefined, opts);
   }
 
+  async createChatSession(req: { agent_id: string; title?: string }): Promise<ChatSession> {
+    // Strict parse — the caller needs the new session id to seed
+    // the detail + messages caches. A malformed response would
+    // otherwise leave the user on a "new chat" screen with no way
+    // to continue. The server contract is the source of truth; we
+    // don't synthesize a fake id on failure.
+    const raw = await this.request<unknown>('POST', '/api/chat/sessions', req);
+    return parseWithFallback(raw, ChatSessionSchema, EMPTY_CHAT_SESSION, {
+      endpoint: 'POST /api/chat/sessions'
+    });
+  }
+
   async listChatMessages(sessionId: string, opts?: RequestOpts): Promise<ChatMessage[]> {
     const raw = await this.request<unknown>(
       'GET',

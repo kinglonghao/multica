@@ -18,6 +18,9 @@ import { BusinessError } from '@ohos.base';
  *   - ws_id          : string | null   (current workspace uuid)
  *   - ws_slug        : string | null
  *   - theme_pref     : 'light' | 'dark' | 'system' (default 'system')
+ *   - locale_pref    : 'en' | 'zh' (default 'en')
+ *   - chat_draft_<id>: string          (per-chat-session draft body)
+ *   - new_issue_draft: string          (new-issue form body)
  */
 
 const STORE_NAME = 'multica_secure_prefs';
@@ -30,6 +33,9 @@ const KEY_USER_AVATAR = 'user_avatar';
 const KEY_WS_ID = 'ws_id';
 const KEY_WS_SLUG = 'ws_slug';
 const KEY_THEME_PREF = 'theme_pref';
+const KEY_LOCALE_PREF = 'locale_pref';
+const KEY_NEW_ISSUE_DRAFT = 'new_issue_draft';
+const KEY_CHAT_DRAFT_PREFIX = 'chat_draft_';
 
 interface PreferencesSnapshot {
   authToken: string | null;
@@ -40,6 +46,7 @@ interface PreferencesSnapshot {
   workspaceId: string | null;
   workspaceSlug: string | null;
   themePref: 'light' | 'dark' | 'system';
+  localePref: 'en' | 'zh';
 }
 
 const EMPTY_SNAPSHOT: PreferencesSnapshot = {
@@ -51,6 +58,7 @@ const EMPTY_SNAPSHOT: PreferencesSnapshot = {
   workspaceId: null,
   workspaceSlug: null,
   themePref: 'system',
+  localePref: 'en',
 };
 
 class PreferencesImpl {
@@ -76,6 +84,8 @@ class PreferencesImpl {
     out.workspaceSlug = await this.store.get(KEY_WS_SLUG, '') as string || null;
     const theme = await this.store.get(KEY_THEME_PREF, 'system') as string;
     out.themePref = (theme === 'light' || theme === 'dark' || theme === 'system') ? theme : 'system';
+    const locale = await this.store.get(KEY_LOCALE_PREF, 'en') as string;
+    out.localePref = (locale === 'en' || locale === 'zh') ? locale : 'en';
     return out;
   }
 
@@ -121,6 +131,55 @@ class PreferencesImpl {
     await this.store.flush();
     this.snapshot = { ...this.snapshot, themePref: pref };
     this.emit();
+  }
+
+  async setLocalePref(pref: 'en' | 'zh'): Promise<void> {
+    if (!this.store) return;
+    await this.store.put(KEY_LOCALE_PREF, pref);
+    await this.store.flush();
+    this.snapshot = { ...this.snapshot, localePref: pref };
+    this.emit();
+  }
+
+  /**
+   * Read a chat-session draft body. The session id is a UUID;
+   * we namespace the key as `chat_draft_<id>` so each session
+   * gets its own slot.
+   */
+  async getChatDraft(sessionId: string): Promise<string> {
+    if (!this.store) return '';
+    return (await this.store.get(KEY_CHAT_DRAFT_PREFIX + sessionId, '') as string) || '';
+  }
+
+  async setChatDraft(sessionId: string, body: string): Promise<void> {
+    if (!this.store) return;
+    const key = KEY_CHAT_DRAFT_PREFIX + sessionId;
+    if (body.length === 0) {
+      await this.store.delete(key);
+    } else {
+      await this.store.put(key, body);
+    }
+    await this.store.flush();
+  }
+
+  /**
+   * Read/write the new-issue form draft. Stored as a single
+   * JSON string so a future field can be added without
+   * bumping the key.
+   */
+  async getNewIssueDraft(): Promise<string> {
+    if (!this.store) return '';
+    return (await this.store.get(KEY_NEW_ISSUE_DRAFT, '') as string) || '';
+  }
+
+  async setNewIssueDraft(body: string): Promise<void> {
+    if (!this.store) return;
+    if (body.length === 0) {
+      await this.store.delete(KEY_NEW_ISSUE_DRAFT);
+    } else {
+      await this.store.put(KEY_NEW_ISSUE_DRAFT, body);
+    }
+    await this.store.flush();
   }
 
   async clearAuth(): Promise<void> {

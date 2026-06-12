@@ -5,6 +5,8 @@ import AbilityConstant from '@ohos.app.ability.AbilityConstant';
 import Want from '@ohos.app.ability.Want';
 import { BusinessError } from '@ohos.base';
 import { PreferencesBootstrap } from '../data/preferences';
+import { themeController } from '../lib/theme-controller';
+import { localeController } from '../lib/locale';
 
 const DOMAIN = 0x0000;
 const TAG = 'EntryAbility';
@@ -40,6 +42,16 @@ export default class EntryAbility extends UIAbility {
       hilog.error(DOMAIN, TAG, 'preferences init failed: %{public}s', JSON.stringify(err));
     }
 
+    // Init the theme + locale controllers from the same persisted
+    // snapshot. Both are no-ops if the controllers are already
+    // initialized (e.g. after a hot reload).
+    try {
+      await themeController.init(this.context);
+      await localeController.init(this.context);
+    } catch (err) {
+      hilog.warn(DOMAIN, TAG, 'controller init failed: %{public}s', JSON.stringify(err));
+    }
+
     windowStage.loadContent('pages/Index', (err: BusinessError) => {
       if (err.code) {
         hilog.error(DOMAIN, TAG, 'Failed to load Index. Cause: %{public}s', JSON.stringify(err));
@@ -58,6 +70,12 @@ export default class EntryAbility extends UIAbility {
     } catch (err) {
       hilog.warn(DOMAIN, TAG, 'setWindowLayoutFullScreen failed: %{public}s', JSON.stringify(err));
     }
+
+    // Wire the system-appearance listener now that the window exists.
+    // Pages re-pull `themeController.scheme` via their subscribers; this
+    // just gives us the trigger when the OS theme flips while the app
+    // is foregrounded.
+    themeController.attachWindowStage(windowStage);
   }
 
   onWindowStageDestroy(): void {

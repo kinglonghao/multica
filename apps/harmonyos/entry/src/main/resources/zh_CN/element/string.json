@@ -1,0 +1,16 @@
+{
+  "string": [
+    {
+      "name": "module_desc",
+      "value": "Multica HarmonyOS 移动端 — AI 原生任务管理"
+    },
+    {
+      "name": "EntryAbility_desc",
+      "value": "Multica 主入口"
+    },
+    {
+      "name": "EntryAbility_label",
+      "value": "Multica"
+    }
+  ]
+}
