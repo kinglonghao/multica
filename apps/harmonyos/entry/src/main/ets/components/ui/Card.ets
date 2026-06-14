@@ -1,11 +1,11 @@
-import { THEME, ColorScheme, RADIUS, SPACE } from '../../lib/theme';
+import { THEME, ColorScheme, RADIUS, SPACE, space, themeTokens } from '../../lib/theme';
 
 @ComponentV2
 export struct Card {
   @Param scheme: ColorScheme = 'light';
   @BuilderParam content?: CustomBuilder;
-  @Param padding: number = SPACE['3'];
-  @Param gap: number = SPACE['2'];
+  @Param contentPadding: number = space('3');
+  @Param gap: number = space('2');
 
   build() {
     Column() {
@@ -13,8 +13,8 @@ export struct Card {
         this.content?.()
       }
     }
-    .padding(this.padding)
-    .backgroundColor(String(THEME[this.scheme].card))
+    .padding(this.contentPadding)
+    .backgroundColor(String(themeTokens(this.scheme).card))
     .borderRadius(RADIUS.lg)
     .alignItems(HorizontalAlign.Start)
   }

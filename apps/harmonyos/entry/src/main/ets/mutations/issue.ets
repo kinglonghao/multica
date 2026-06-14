@@ -1,7 +1,6 @@
-import { api, getBaseUrl } from '../data/api';
+import { api } from '../data/api';
 import { queryClient } from '../queries/cache';
 import { workspaceStore } from '../data/workspace';
-import { Preferences } from '../data/preferences';
 import { issueDetailKey, issueListKey } from '../queries/issue';
 import { Comment, Issue, IssueReaction, UpdateIssueRequest } from '../models/types';
 
@@ -41,13 +40,13 @@ export async function updateIssue(issueId: string, req: UpdateIssueRequest): Pro
   } catch (err) {
     // Rollback: write the prior value back if we had one.
     if (prior) queryClient.setQueryData<Issue>(key, prior);
-    throw err;
+    throw err instanceof Error ? err : new Error('Failed to update issue');
   }
 }
 
 export async function deleteIssue(issueId: string): Promise<void> {
   const key = issueDetailKey(wsId(), issueId);
-  await api.deleteIssue(issueId);
+  await api.archiveIssue(issueId);
   queryClient.invalidate(key);
   queryClient.invalidatePrefix(['issues', wsId()]);
 }
@@ -72,25 +71,7 @@ export async function deleteComment(issueId: string, commentId: string): Promise
 }
 
 export async function reactToComment(issueId: string, commentId: string, emoji: string): Promise<IssueReaction> {
-  // The reaction endpoint is reached through the system fetch
-  // because api.ets doesn't yet expose a typed method. Pull the
-  // base URL + auth headers from the shared modules.
-  const resp = await fetch(
-    `${getBaseUrl()}/api/comments/${commentId}/reactions`,
-    {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${Preferences.get('authToken') ?? ''}`,
-        'X-Workspace-Slug': Preferences.get('workspaceSlug') ?? ''
-      },
-      body: JSON.stringify({ emoji })
-    }
-  );
-  if (!resp.ok) {
-    throw new Error(`reactToComment failed: ${resp.status}`);
-  }
-  const reaction = (await resp.json()) as IssueReaction;
+  const reaction = await api.reactToComment(commentId, emoji);
   queryClient.invalidate(issueDetailKey(wsId(), issueId));
   return reaction;
 }

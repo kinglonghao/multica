@@ -1,5 +1,11 @@
 import { WSEnvelope, WSEventType } from '../models/types';
 
+interface WSRawEnvelope {
+  event?: string;
+  payload?: Object | string | number | boolean | null;
+  ts?: string;
+}
+
 /**
  * Validates a raw WS message string into a typed `WSEnvelope`. Mirrors
  * the iOS client's runtime validation (H-5) — without this, a malformed
@@ -12,9 +18,9 @@ import { WSEnvelope, WSEventType } from '../models/types';
  * `event` is a string. Unknown event names are accepted — handlers
  * registered for that name will fire; everything else is dropped.
  */
-export const parseWSEnvelope: (raw: string) => WSEnvelope | null =
-  (raw: string): WSEnvelope | null => {
-    let parsed: unknown;
+export const parseWSEnvelope: (raw: string) => WSEnvelope<Object | string | number | boolean | null> | null =
+  (raw: string): WSEnvelope<Object | string | number | boolean | null> | null => {
+    let parsed: Object | string | number | boolean | null = null;
     try {
       parsed = JSON.parse(raw);
     } catch {
@@ -25,18 +31,17 @@ export const parseWSEnvelope: (raw: string) => WSEnvelope | null =
       console.warn('[ws-validate] not an object');
       return null;
     }
-    const obj = parsed as Record<string, unknown>;
-    if (typeof obj['event'] !== 'string') {
+    const obj = parsed as WSRawEnvelope;
+    if (typeof obj.event !== 'string') {
       console.warn('[ws-validate] missing or non-string `event`');
       return null;
     }
-    if (typeof obj['ts'] !== 'string') {
+    if (typeof obj.ts !== 'string') {
       console.warn('[ws-validate] missing or non-string `ts`');
       return null;
     }
-    // payload is allowed to be any shape — handlers can narrow.
-    const event = obj['event'] as WSEventType;
-    const ts = obj['ts'] as string;
-    const payload = obj['payload'];
+    const event = obj.event as WSEventType;
+    const ts = obj.ts;
+    const payload = obj.payload ?? null;
     return { event, payload, ts };
   };

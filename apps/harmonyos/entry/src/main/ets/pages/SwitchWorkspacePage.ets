@@ -1,7 +1,7 @@
 import { appNavigation } from '../data/navigation';
 import { workspaceStore } from '../data/workspace';
 import { Workspace } from '../models/types';
-import { THEME, ColorScheme, SPACE, RADIUS } from '../lib/theme';
+import { THEME, ColorScheme, SPACE, RADIUS, space, themeTokens } from '../lib/theme';
 import { MulticaText } from '../components/ui/Text';
 import { Header } from '../components/ui/Header';
 import { IconButton } from '../components/ui/IconButton';
@@ -36,7 +36,7 @@ export struct SwitchWorkspacePage {
     await workspaceStore.setCurrent(ws.id, ws.slug);
     // Bug 3 fix: same as SelectWorkspacePage — pop back to the root
     // so the tab content refetches under the new workspace context.
-    appNavigation.clearStack();
+    appNavigation.clear();
   }
 
   build() {
@@ -50,11 +50,11 @@ export struct SwitchWorkspacePage {
       if (this.loading) {
         Column() {
           ForEach([1, 2, 3], () => {
-            Skeleton({ scheme: this.scheme, width: '90%', height: 56, radius: 8 })
-              .margin({ top: SPACE['3'] })
+            Skeleton({ scheme: this.scheme, skeletonWidth: '90%', skeletonHeight: 56, radius: 8 })
+              .margin({ top: space('3') })
           })
         }
-        .padding(SPACE['4'])
+        .padding(space('4'))
         .width('100%')
       } else {
         List({ space: 0 }) {
@@ -64,7 +64,7 @@ export struct SwitchWorkspacePage {
                 MulticaText({
                   value: ws.name,
                   scheme: this.scheme,
-                  size: 'base',
+                  textSize: 'base',
                   weight: 'medium',
                   color: 'foreground'
                 })
@@ -73,17 +73,17 @@ export struct SwitchWorkspacePage {
                   MulticaText({
                     value: '✓',
                     scheme: this.scheme,
-                    size: 'base',
+                    textSize: 'base',
                     weight: 'medium',
                     color: 'brand'
                   })
                 }
               }
               .width('100%')
-              .padding(SPACE['4'])
-              .backgroundColor(String(THEME[this.scheme].card))
+              .padding(space('4'))
+              .backgroundColor(String(themeTokens(this.scheme).card))
               .borderRadius(RADIUS.md)
-              .margin({ top: SPACE['2'], left: SPACE['4'], right: SPACE['4'] })
+              .margin({ top: space('2'), left: space('4'), right: space('4') })
               .onClick(() => { void this.pick(ws); })
             }
           })
@@ -94,7 +94,7 @@ export struct SwitchWorkspacePage {
     }
     .width('100%')
     .height('100%')
-    .backgroundColor(String(THEME[this.scheme].background))
+    .backgroundColor(String(themeTokens(this.scheme).background))
   }
 
   @Builder BackButton() {

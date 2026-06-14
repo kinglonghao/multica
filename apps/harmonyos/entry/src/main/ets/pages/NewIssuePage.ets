@@ -1,9 +1,9 @@
-import { appNavigation } from '../data/navigation';
+import { appNavigation, navParam } from '../data/navigation';
 import { api } from '../data/api';
 import { queryClient } from '../queries/cache';
 import { workspaceStore } from '../data/workspace';
 import { CreateIssueRequest, IssueStatus, IssuePriority } from '../models/types';
-import { THEME, ColorScheme, SPACE, RADIUS } from '../lib/theme';
+import { THEME, ColorScheme, SPACE, RADIUS, space, themeTokens } from '../lib/theme';
 import { statusLabel, priorityLabel } from '../lib/issue-status';
 import { MulticaText } from '../components/ui/Text';
 import { Header } from '../components/ui/Header';
@@ -53,7 +53,7 @@ export struct NewIssuePage {
       // 'issues'. The next subscriber refetches from /api/issues
       // and picks up the new row.
       this.invalidateIssueLists();
-      appNavigation.pushName('IssueDetailPage', { id: issue.id });
+      appNavigation.pushName('IssueDetailPage', navParam('id', issue.id));
     } catch (err) {
       this.errorMessage = err instanceof Error ? err.message : 'Failed to create issue';
     } finally {
@@ -88,20 +88,20 @@ export struct NewIssuePage {
           MulticaText({
             value: 'Title',
             scheme: this.scheme,
-            size: 'sm',
+            textSize: 'sm',
             weight: 'medium',
             color: 'foreground'
           })
-            .margin({ top: SPACE['4'] })
+            .margin({ top: space('4') })
 
           TextInput({ placeholder: 'What needs to be done?', text: this.title })
-            .placeholderColor(String(THEME[this.scheme].mutedForeground))
-            .fontColor(String(THEME[this.scheme].foreground))
-            .backgroundColor(String(THEME[this.scheme].card))
+            .placeholderColor(String(themeTokens(this.scheme).mutedForeground))
+            .fontColor(String(themeTokens(this.scheme).foreground))
+            .backgroundColor(String(themeTokens(this.scheme).card))
             .borderRadius(RADIUS.md)
-            .padding(SPACE['3'])
+            .padding(space('3'))
             .width('100%')
-            .margin({ top: SPACE['2'] })
+            .margin({ top: space('2') })
             .onChange((value: string) => {
               this.title = value;
               this.errorMessage = '';
@@ -110,21 +110,21 @@ export struct NewIssuePage {
           MulticaText({
             value: 'Description',
             scheme: this.scheme,
-            size: 'sm',
+            textSize: 'sm',
             weight: 'medium',
             color: 'foreground'
           })
-            .margin({ top: SPACE['4'] })
+            .margin({ top: space('4') })
 
           TextArea({ placeholder: 'Add more context (optional)', text: this.description })
-            .placeholderColor(String(THEME[this.scheme].mutedForeground))
-            .fontColor(String(THEME[this.scheme].foreground))
-            .backgroundColor(String(THEME[this.scheme].card))
+            .placeholderColor(String(themeTokens(this.scheme).mutedForeground))
+            .fontColor(String(themeTokens(this.scheme).foreground))
+            .backgroundColor(String(themeTokens(this.scheme).card))
             .borderRadius(RADIUS.md)
-            .padding(SPACE['3'])
+            .padding(space('3'))
             .width('100%')
             .height(120)
-            .margin({ top: SPACE['2'] })
+            .margin({ top: space('2') })
             .onChange((value: string) => {
               this.description = value;
             })
@@ -136,13 +136,13 @@ export struct NewIssuePage {
             MulticaText({
               value: this.errorMessage,
               scheme: this.scheme,
-              size: 'sm',
+              textSize: 'sm',
               color: 'destructive'
             })
-              .margin({ top: SPACE['2'] })
+              .margin({ top: space('2') })
           }
         }
-        .padding(SPACE['4'])
+        .padding(space('4'))
         .alignItems(HorizontalAlign.Start)
       }
       .layoutWeight(1)
@@ -150,7 +150,7 @@ export struct NewIssuePage {
     }
     .width('100%')
     .height('100%')
-    .backgroundColor(String(THEME[this.scheme].background))
+    .backgroundColor(String(themeTokens(this.scheme).background))
   }
 
   @Builder PickerRow(kind: 'status' | 'priority', label: string, value: string) {
@@ -158,7 +158,7 @@ export struct NewIssuePage {
       MulticaText({
         value: label,
         scheme: this.scheme,
-        size: 'sm',
+        textSize: 'sm',
         weight: 'medium',
         color: 'foreground'
       })
@@ -166,21 +166,21 @@ export struct NewIssuePage {
       MulticaText({
         value: value,
         scheme: this.scheme,
-        size: 'sm',
+        textSize: 'sm',
         color: 'mutedForeground'
       })
       MulticaText({
         value: ' ›',
         scheme: this.scheme,
-        size: 'sm',
+        textSize: 'sm',
         color: 'mutedForeground'
       })
     }
     .width('100%')
-    .padding({ left: SPACE['3'], right: SPACE['3'], top: SPACE['3'], bottom: SPACE['3'] })
-    .backgroundColor(String(THEME[this.scheme].card))
+    .padding({ left: space('3'), right: space('3'), top: space('3'), bottom: space('3') })
+    .backgroundColor(String(themeTokens(this.scheme).card))
     .borderRadius(RADIUS.md)
-    .margin({ top: SPACE['3'] })
+    .margin({ top: space('3') })
     .onClick(() => {
       // Bug 10 fix: dispatch on the typed `kind` param, not the
       // human-readable label. The label is a future i18n concern;
@@ -208,7 +208,7 @@ export struct NewIssuePage {
       label: this.saving ? 'Saving…' : 'Create',
       scheme: this.scheme,
       variant: 'primary',
-      size: 'sm',
+      buttonSize: 'sm',
       disabled: this.saving,
       onTap: () => { void this.submit(); }
     })

@@ -14,10 +14,34 @@
  *   - Pages push / pop / replace via the helpers below; the helpers
  *     delegate to `appNavigation.stack` so the call site is short
  *     and the routing logic stays in one place.
+ *
+ * ArkTS notes (C-1):
+ *   - The original `NavParam` was an indexed-signature interface
+ *     (`[key: string]: string | number | boolean | object | undefined`).
+ *     ArkTS 1.1 strict mode rejects indexed signatures, AND forbids
+ *     direct `obj[key]` indexed access on a bare `Object`. We
+ *     collapse the design to a single `(key, value)` pair per
+ *     `pushName` call (which is all every call site needs — the
+ *     `key` is just a human-readable label; the `value` is the only
+ *     thing the destination builder reads), and expose typed
+ *     accessors on the class.
+ *   - `readString` is also simplified: the caller used to pass
+ *     `key` so the helper could look the value up by name. The
+ *     ArkTS-safe version reads the single stored `value` directly.
+ *     The `key` parameter is kept on the call site for readability
+ *     and is no longer used at runtime.
  */
 
-export interface NavParam {
-  [key: string]: string | number | boolean | object | undefined;
+export class NavParam {
+  /** Human-readable label. Optional — the runtime never reads it
+   *  (the destination builder reads `value` directly). Kept for
+   *  debug logs and call-site readability. */
+  public key: string = '';
+  public value: string | number | boolean | object | undefined = undefined;
+}
+
+export function navParam(key: string, value: string | number | boolean | object | undefined): NavParam {
+  return { key, value } as NavParam;
 }
 
 class AppNavigation {
@@ -48,20 +72,25 @@ class AppNavigation {
   }
 
   /**
-   * Read a string param from the top of the stack for a given
+   * Read the string value from the top of the stack for a given
    * destination. Used by the destination builder (destinations.ets)
    * to pass typed values into sub-page components. We isolate it
    * here so the cast lives in one well-tested place.
+   *
+   * The `key` parameter is kept on the signature so existing
+   * call-sites (`readString('VerifyPage', 'email', '')`) still
+   * compile, but the runtime no longer needs it — every
+   * `pushName` call stores a single `(key, value)` pair and
+   * we read `value` directly.
    */
-  readString(name: string, key: string, fallback: string): string {
-    const top = this.stack.getParamByName(name);
+  readString(name: string, _key: string, fallback: string): string {
+    const top = this.stack.getParamByName(name) as Object[] | undefined;
     if (!top || top.length === 0) return fallback;
     const params = top[top.length - 1];
     if (!params) return fallback;
-    const v = (params as Record<string, string | number | boolean>)[key];
+    const v = (params as NavParam).value;
     return typeof v === 'string' ? v : fallback;
   }
 }
 
 export const appNavigation: AppNavigation = new AppNavigation();
-export type { NavParam };

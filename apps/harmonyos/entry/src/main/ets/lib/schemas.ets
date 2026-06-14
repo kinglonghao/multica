@@ -25,6 +25,27 @@
  * the type exactly. The fallback MUST be a value the rest of the
  * app can render without crashing — typically an empty array, a
  * stub object with `id: ""`, or `null` (for nullable endpoints).
+ *
+ * Why this file uses `Object` + named readers instead of
+ * `unknown` + type guards: ArkTS 1.1 strict mode rejects
+ * `unknown` as a type annotation, `value is T` as a user-defined
+ * type guard, the `in` operator, inline object-literal type
+ * expressions, indexed access types (`T['key']`), and
+ * `Function.call` / `Function.apply` / prototype assignment. We
+ * replace the dynamic validator with:
+ *   - a set of typed `readXxx` helpers that do one `typeof` check
+ *     at a time;
+ *   - `Object.hasOwn(obj, key)` (static method) instead of
+ *     `Object.prototype.hasOwnProperty.call(obj, key)`;
+ *   - one named interface per response envelope (and per EMPTY
+ *     fallback) so the type appears in a type position, not an
+ *     inline literal;
+ *   - one `class XxxSchemaImpl implements Schema<T>` per shape,
+ *     because object-literal `validate` methods are not
+ *     considered to "implement" a named interface by ArkTS.
+ * The validator surface (`Schema<T>::validate`) still narrows
+ * from a wide input to a typed output — exactly the behaviour iOS
+ * gets from zod.
  */
 
 import {
@@ -33,51 +54,239 @@ import {
   Comment,
   InboxItem,
   Issue,
+  IssueReaction,
+  Label,
   Project
 } from '../models/types';
 import {
+  JsonValue,
   Schema,
   ParseResult,
+  ParseFailure,
   fail,
   isObject,
   ok
 } from './parse-response';
 
-// ---------- helpers ----------
+// ---------- local type aliases ----------
+//
+// Several model types are unions whose elements are inferred via
+// indexed access (`Issue['labels']`, `Comment['author_type']`, etc.).
+// ArkTS forbids indexed access types in type positions
+// (`arkts-no-aliases-by-index`), so we restate the unions as
+// explicit local aliases. They MUST stay in lockstep with
+// `models/types.ets` — diff the two on every type rebase.
 
-function isString(value: unknown): value is string {
-  return typeof value === 'string';
+type IssueAssigneeTypeLit = 'member' | 'agent';
+type CommentAuthorTypeLit = 'member' | 'agent';
+type AgentTaskStatusLit = 'pending' | 'running' | 'completed' | 'failed' | 'cancelled';
+type ChatRoleLit = 'user' | 'assistant' | 'system' | 'tool';
+
+// ---------- typed readers ----------
+//
+// Each helper takes the raw input as `Object`, performs one
+// `typeof` / `instanceof` check, and either returns the typed
+// value or `defaultValue`. They replace the user-defined
+// `value is T` predicates the iOS code uses (`isString`,
+// `isNumber`, `isIssueAssigneeType`, etc.) and the `in`-based
+// presence check the `readField` helper relied on.
+
+/** True if `obj` has its own enumerable property at `key`. ArkTS
+ *  forbids the `in` operator, `Object.hasOwn` (needs ES2022 lib),
+ *  AND `Function.call` / `Function.apply`. The only path left is
+ *  to enumerate `Object.keys` and check by hand — slow in the
+ *  general case but our use is shallow (top-level fields only). */
+function hasKey(obj: Object, key: string): boolean {
+  const keys: string[] = Object.keys(obj);
+  for (let i = 0; i < keys.length; i++) {
+    if (keys[i] === key) return true;
+  }
+  return false;
 }
 
-function isNumber(value: unknown): value is number {
-  return typeof value === 'number' && Number.isFinite(value);
+/** Look up `key` on `obj` and return the raw value, or
+ *  `undefined` if absent. ArkTS forbids direct `obj[key]`
+ *  indexed access on a bare `Object`, so we cast through
+ *  `Record<string, Object>` (the only indexed-signature-bearing
+ *  type ArkTS tolerates as a cast target). */
+function getField(obj: Object, key: string): Object | undefined {
+  return (obj as Record<string, Object>)[key];
 }
 
-function isBoolean(value: unknown): value is boolean {
-  return typeof value === 'boolean';
+/** Helper: cast a `JsonValue` to `Object` for the read helpers.
+ *  Callers must have already verified with `isObject` that
+ *  the value is an object — this is the unsafe cast ArkTS
+ *  forces on us because type predicates (`value is T`) are
+ *  rejected (arkts-no-is). */
+function asObject(v: JsonValue): Object | null {
+  return v as Object;
 }
 
-function isStringArray(value: unknown): value is string[] {
-  return Array.isArray(value) && value.every(isString);
-}
-
-function isNullableString(value: unknown): value is string | null | undefined {
-  return value === null || value === undefined || isString(value);
-}
-
-/**
- * Lenient reader: returns the typed value if it matches the
- * shape, or `defaultValue` if the field is missing / wrong type.
- * The schema as a whole still succeeds (a "wrong-type" field is
- * not a "wrong-shape" response). This matches zod's `.default()`
- * behaviour and keeps the page from breaking when a server adds a
- * field we haven't yet mirrored.
- */
-function readField<T>(obj: Record<string, unknown>, key: string, predicate: (v: unknown) => v is T, defaultValue: T): T {
-  if (!(key in obj)) return defaultValue;
-  const v = obj[key];
+function readString(value: JsonValue, key: string, defaultValue: string): string {
+  const obj = asObject(value);
+  if (obj === null) return defaultValue;
+  if (!hasKey(obj, key)) return defaultValue;
+  const v = getField(obj, key);
   if (v === undefined || v === null) return defaultValue;
-  return predicate(v) ? v : defaultValue;
+  return typeof v === 'string' ? v as string : defaultValue;
+}
+
+function readNumber(value: JsonValue, key: string, defaultValue: number): number {
+  const obj = asObject(value);
+  if (obj === null) return defaultValue;
+  if (!hasKey(obj, key)) return defaultValue;
+  const v = getField(obj, key);
+  if (v === undefined || v === null) return defaultValue;
+  return typeof v === 'number' && Number.isFinite(v as number) ? v as number : defaultValue;
+}
+
+function readBoolean(value: JsonValue, key: string, defaultValue: boolean): boolean {
+  const obj = asObject(value);
+  if (obj === null) return defaultValue;
+  if (!hasKey(obj, key)) return defaultValue;
+  const v = getField(obj, key);
+  if (v === undefined || v === null) return defaultValue;
+  return typeof v === 'boolean' ? v as boolean : defaultValue;
+}
+
+function readNullableString(value: JsonValue, key: string): string | null {
+  const obj = asObject(value);
+  if (obj === null) return null;
+  if (!hasKey(obj, key)) return null;
+  const v = getField(obj, key);
+  if (v === undefined || v === null) return null;
+  return typeof v === 'string' ? v as string : null;
+}
+
+function readNullableNumber(value: JsonValue, key: string): number | null {
+  const obj = asObject(value);
+  if (obj === null) return null;
+  if (!hasKey(obj, key)) return null;
+  const v = getField(obj, key);
+  if (v === undefined || v === null) return null;
+  return typeof v === 'number' && Number.isFinite(v as number) ? v as number : null;
+}
+
+function readNullableObject(value: JsonValue, key: string): Record<string, Object> | null {
+  const obj = asObject(value);
+  if (obj === null) return null;
+  if (!hasKey(obj, key)) return null;
+  const v = getField(obj, key);
+  if (v === undefined || v === null) return null;
+  return isObject(v as JsonValue) ? v as Record<string, Object> : null;
+}
+
+function readIssueAssigneeType(value: JsonValue, key: string): IssueAssigneeTypeLit | null {
+  const obj = asObject(value);
+  if (obj === null) return null;
+  if (!hasKey(obj, key)) return null;
+  const v = getField(obj, key);
+  if (v === undefined || v === null) return null;
+  return v === 'member' || v === 'agent' ? v as IssueAssigneeTypeLit : null;
+}
+
+function readCommentAuthorType(value: JsonValue, key: string): CommentAuthorTypeLit | null {
+  const obj = asObject(value);
+  if (obj === null) return null;
+  if (!hasKey(obj, key)) return null;
+  const v = getField(obj, key);
+  if (v === undefined || v === null) return null;
+  return v === 'member' || v === 'agent' ? v as CommentAuthorTypeLit : null;
+}
+
+function readAgentTaskStatus(
+  value: JsonValue,
+  key: string,
+  defaultValue: AgentTaskStatusLit
+): AgentTaskStatusLit {
+  const obj = asObject(value);
+  if (obj === null) return defaultValue;
+  if (!hasKey(obj, key)) return defaultValue;
+  const v = getField(obj, key);
+  if (
+    v === 'pending' || v === 'running' || v === 'completed' ||
+    v === 'failed' || v === 'cancelled'
+  ) {
+    return v as AgentTaskStatusLit;
+  }
+  return defaultValue;
+}
+
+function readChatRole(
+  value: JsonValue,
+  key: string,
+  defaultValue: ChatRoleLit
+): ChatRoleLit {
+  const obj = asObject(value);
+  if (obj === null) return defaultValue;
+  if (!hasKey(obj, key)) return defaultValue;
+  const v = getField(obj, key);
+  if (v === 'user' || v === 'assistant' || v === 'system' || v === 'tool') {
+    return v as ChatRoleLit;
+  }
+  return defaultValue;
+}
+
+function readLabelsArray(value: JsonValue, key: string): Label[] | null {
+  const obj = asObject(value);
+  if (obj === null) return null;
+  if (!hasKey(obj, key)) return null;
+  const v = getField(obj, key);
+  if (v === undefined || v === null) return null;
+  return Array.isArray(v) ? v as Label[] : null;
+}
+
+function readReactionsArray(value: JsonValue, key: string): IssueReaction[] {
+  const obj = asObject(value);
+  if (obj === null) return [];
+  if (!hasKey(obj, key)) return [];
+  const v = getField(obj, key);
+  if (!Array.isArray(v)) return [];
+  return v as IssueReaction[];
+}
+
+function readRequiredId(value: JsonValue): string | null {
+  const obj = asObject(value);
+  if (obj === null) return null;
+  if (!hasKey(obj, 'id')) return null;
+  const v = getField(obj, 'id');
+  return typeof v === 'string' ? v as string : null;
+}
+
+/** Pull a `Issue[]` out of an `Object`, dropping rows that fail
+ *  per-row validation. */
+function readIssueList(value: JsonValue, key: string): Issue[] {
+  const obj = asObject(value);
+  if (obj === null) return [];
+  if (!hasKey(obj, key)) return [];
+  const v = getField(obj, key);
+  if (!Array.isArray(v)) return [];
+  const arr = v as Object[];
+  const out: Issue[] = [];
+  for (let i = 0; i < arr.length; i++) {
+    const r = IssueSchema.validate(arr[i] as JsonValue);
+    if (r.success) {
+      out.push(r.data);
+    }
+  }
+  return out;
+}
+
+function readProjectList(value: JsonValue, key: string): Project[] {
+  const obj = asObject(value);
+  if (obj === null) return [];
+  if (!hasKey(obj, key)) return [];
+  const v = getField(obj, key);
+  if (!Array.isArray(v)) return [];
+  const arr = v as Object[];
+  const out: Project[] = [];
+  for (let i = 0; i < arr.length; i++) {
+    const r = ProjectSchema.validate(arr[i] as JsonValue);
+    if (r.success) {
+      out.push(r.data);
+    }
+  }
+  return out;
 }
 
 // ---------- Issue ----------
@@ -106,36 +315,39 @@ export const EMPTY_ISSUE: Issue = {
   comment_count: 0
 };
 
-export const IssueSchema: Schema<Issue> = {
-  validate(value: unknown): ParseResult<Issue> {
+class IssueSchemaImpl implements Schema<Issue> {
+  validate(value: JsonValue): ParseResult<Issue> {
     if (!isObject(value)) return fail('Issue: not an object', ['Issue must be a non-null object']);
-    const id = value['id'];
-    if (!isString(id)) return fail('Issue.id missing or not a string', ['Issue.id must be a string']);
-    return ok({
+    const id = readRequiredId(value);
+    if (id === null) return fail('Issue.id missing or not a string', ['Issue.id must be a string']);
+    const data: Issue = {
       id,
-      number: readField(value, 'number', isNumber, 0),
-      identifier: readField(value, 'identifier', isString, ''),
-      title: readField(value, 'title', isString, ''),
-      description: readField(value, 'description', isNullableString, null),
-      status: readField(value, 'status', isString, 'backlog'),
-      priority: readField(value, 'priority', isString, 'no_priority'),
-      workspace_id: readField(value, 'workspace_id', isString, ''),
-      project_id: readField(value, 'project_id', isNullableString, null),
-      assignee_id: readField(value, 'assignee_id', isNullableString, null),
-      assignee_type: readField(value, 'assignee_type', isNullableString, null),
-      assignee_name: readField(value, 'assignee_name', isNullableString, null),
-      assignee_avatar_url: readField(value, 'assignee_avatar_url', isNullableString, null),
-      creator_id: readField(value, 'creator_id', isNullableString, null),
-      creator_name: readField(value, 'creator_name', isNullableString, null),
-      creator_avatar_url: readField(value, 'creator_avatar_url', isNullableString, null),
-      due_date: readField(value, 'due_date', isNullableString, null),
-      created_at: readField(value, 'created_at', isString, ''),
-      updated_at: readField(value, 'updated_at', isString, ''),
-      labels: readField(value, 'labels', (v): v is Issue['labels'] => v === null || Array.isArray(v), null),
-      comment_count: readField(value, 'comment_count', isNumber, 0)
-    });
+      number: readNumber(value, 'number', 0),
+      identifier: readString(value, 'identifier', ''),
+      title: readString(value, 'title', ''),
+      description: readNullableString(value, 'description'),
+      status: readString(value, 'status', 'backlog'),
+      priority: readString(value, 'priority', 'no_priority'),
+      workspace_id: readString(value, 'workspace_id', ''),
+      project_id: readNullableString(value, 'project_id'),
+      assignee_id: readNullableString(value, 'assignee_id'),
+      assignee_type: readIssueAssigneeType(value, 'assignee_type'),
+      assignee_name: readNullableString(value, 'assignee_name'),
+      assignee_avatar_url: readNullableString(value, 'assignee_avatar_url'),
+      creator_id: readNullableString(value, 'creator_id'),
+      creator_name: readNullableString(value, 'creator_name'),
+      creator_avatar_url: readNullableString(value, 'creator_avatar_url'),
+      due_date: readNullableString(value, 'due_date'),
+      created_at: readString(value, 'created_at', ''),
+      updated_at: readString(value, 'updated_at', ''),
+      labels: readLabelsArray(value, 'labels'),
+      comment_count: readNumber(value, 'comment_count', 0)
+    };
+    return ok(data);
   }
-};
+}
+
+export const IssueSchema: Schema<Issue> = new IssueSchemaImpl();
 
 // ---------- Comment ----------
 
@@ -153,26 +365,29 @@ export const EMPTY_COMMENT: Comment = {
   reactions: []
 };
 
-export const CommentSchema: Schema<Comment> = {
-  validate(value: unknown): ParseResult<Comment> {
+class CommentSchemaImpl implements Schema<Comment> {
+  validate(value: JsonValue): ParseResult<Comment> {
     if (!isObject(value)) return fail('Comment: not an object');
-    const id = value['id'];
-    if (!isString(id)) return fail('Comment.id missing or not a string');
-    return ok({
+    const id = readRequiredId(value);
+    if (id === null) return fail('Comment.id missing or not a string');
+    const data: Comment = {
       id,
-      issue_id: readField(value, 'issue_id', isString, ''),
-      body: readField(value, 'body', isString, ''),
-      author_id: readField(value, 'author_id', isString, ''),
-      author_name: readField(value, 'author_name', isNullableString, null),
-      author_avatar_url: readField(value, 'author_avatar_url', isNullableString, null),
-      author_type: readField(value, 'author_type', isNullableString, null),
-      created_at: readField(value, 'created_at', isString, ''),
-      updated_at: readField(value, 'updated_at', isString, ''),
-      edited: readField(value, 'edited', isBoolean, false),
-      reactions: readField(value, 'reactions', (v) => Array.isArray(v), [])
-    });
+      issue_id: readString(value, 'issue_id', ''),
+      body: readString(value, 'body', ''),
+      author_id: readString(value, 'author_id', ''),
+      author_name: readNullableString(value, 'author_name'),
+      author_avatar_url: readNullableString(value, 'author_avatar_url'),
+      author_type: readCommentAuthorType(value, 'author_type'),
+      created_at: readString(value, 'created_at', ''),
+      updated_at: readString(value, 'updated_at', ''),
+      edited: readBoolean(value, 'edited', false),
+      reactions: readReactionsArray(value, 'reactions')
+    };
+    return ok(data);
   }
-};
+}
+
+export const CommentSchema: Schema<Comment> = new CommentSchemaImpl();
 
 // ---------- Project ----------
 
@@ -195,31 +410,34 @@ export const EMPTY_PROJECT: Project = {
   progress: 0
 };
 
-export const ProjectSchema: Schema<Project> = {
-  validate(value: unknown): ParseResult<Project> {
+class ProjectSchemaImpl implements Schema<Project> {
+  validate(value: JsonValue): ParseResult<Project> {
     if (!isObject(value)) return fail('Project: not an object');
-    const id = value['id'];
-    if (!isString(id)) return fail('Project.id missing or not a string');
-    return ok({
+    const id = readRequiredId(value);
+    if (id === null) return fail('Project.id missing or not a string');
+    const data: Project = {
       id,
-      name: readField(value, 'name', isString, ''),
-      identifier: readField(value, 'identifier', isString, ''),
-      description: readField(value, 'description', isNullableString, null),
-      status: readField(value, 'status', isString, 'planned'),
-      priority: readField(value, 'priority', isString, 'no_priority'),
-      workspace_id: readField(value, 'workspace_id', isString, ''),
-      lead_id: readField(value, 'lead_id', isNullableString, null),
-      lead_name: readField(value, 'lead_name', isNullableString, null),
-      lead_avatar_url: readField(value, 'lead_avatar_url', isNullableString, null),
-      start_date: readField(value, 'start_date', isNullableString, null),
-      target_date: readField(value, 'target_date', isNullableString, null),
-      created_at: readField(value, 'created_at', isString, ''),
-      updated_at: readField(value, 'updated_at', isString, ''),
-      issue_count: readField(value, 'issue_count', isNumber, 0),
-      progress: readField(value, 'progress', isNumber, 0)
-    });
+      name: readString(value, 'name', ''),
+      identifier: readString(value, 'identifier', ''),
+      description: readNullableString(value, 'description'),
+      status: readString(value, 'status', 'planned'),
+      priority: readString(value, 'priority', 'no_priority'),
+      workspace_id: readString(value, 'workspace_id', ''),
+      lead_id: readNullableString(value, 'lead_id'),
+      lead_name: readNullableString(value, 'lead_name'),
+      lead_avatar_url: readNullableString(value, 'lead_avatar_url'),
+      start_date: readNullableString(value, 'start_date'),
+      target_date: readNullableString(value, 'target_date'),
+      created_at: readString(value, 'created_at', ''),
+      updated_at: readString(value, 'updated_at', ''),
+      issue_count: readNumber(value, 'issue_count', 0),
+      progress: readNumber(value, 'progress', 0)
+    };
+    return ok(data);
   }
-};
+}
+
+export const ProjectSchema: Schema<Project> = new ProjectSchemaImpl();
 
 // ---------- InboxItem ----------
 
@@ -238,40 +456,45 @@ export const EMPTY_INBOX_ITEM: InboxItem = {
   updated_at: ''
 };
 
-export const InboxItemSchema: Schema<InboxItem> = {
-  validate(value: unknown): ParseResult<InboxItem> {
+class InboxItemSchemaImpl implements Schema<InboxItem> {
+  validate(value: JsonValue): ParseResult<InboxItem> {
     if (!isObject(value)) return fail('InboxItem: not an object');
-    const id = value['id'];
-    if (!isString(id)) return fail('InboxItem.id missing or not a string');
-    return ok({
+    const id = readRequiredId(value);
+    if (id === null) return fail('InboxItem.id missing or not a string');
+    const data: InboxItem = {
       id,
-      type: readField(value, 'type', isString, 'mention'),
-      read: readField(value, 'read', isBoolean, false),
-      archived: readField(value, 'archived', isBoolean, false),
-      issue_id: readField(value, 'issue_id', isNullableString, null),
-      workspace_id: readField(value, 'workspace_id', isString, ''),
-      actor_id: readField(value, 'actor_id', isNullableString, null),
-      actor_name: readField(value, 'actor_name', isNullableString, null),
-      actor_avatar_url: readField(value, 'actor_avatar_url', isNullableString, null),
-      details: readField(value, 'details', (v) => v === null || isObject(v), null),
-      created_at: readField(value, 'created_at', isString, ''),
-      updated_at: readField(value, 'updated_at', isString, '')
-    });
+      type: readString(value, 'type', 'mention'),
+      read: readBoolean(value, 'read', false),
+      archived: readBoolean(value, 'archived', false),
+      issue_id: readNullableString(value, 'issue_id'),
+      workspace_id: readString(value, 'workspace_id', ''),
+      actor_id: readNullableString(value, 'actor_id'),
+      actor_name: readNullableString(value, 'actor_name'),
+      actor_avatar_url: readNullableString(value, 'actor_avatar_url'),
+      details: readNullableObject(value, 'details'),
+      created_at: readString(value, 'created_at', ''),
+      updated_at: readString(value, 'updated_at', '')
+    };
+    return ok(data);
   }
-};
+}
+
+export const InboxItemSchema: Schema<InboxItem> = new InboxItemSchemaImpl();
 
 export const EMPTY_INBOX_LIST: InboxItem[] = [];
-export const InboxListSchema: Schema<InboxItem[]> = {
-  validate(value: unknown): ParseResult<InboxItem[]> {
+
+class InboxListSchemaImpl implements Schema<InboxItem[]> {
+  validate(value: JsonValue): ParseResult<InboxItem[]> {
     if (!Array.isArray(value)) return fail('InboxList: not an array');
+    const arr = value as Object[];
     const out: InboxItem[] = [];
     const dropped: string[] = [];
-    for (const item of value) {
-      const r = InboxItemSchema.validate(item);
+    for (let i = 0; i < arr.length; i++) {
+      const r = InboxItemSchema.validate(arr[i] as JsonValue);
       if (r.success) {
         out.push(r.data);
       } else {
-        dropped.push(r.error);
+        dropped.push((r as ParseFailure).error);
       }
     }
     if (dropped.length > 0) {
@@ -282,7 +505,9 @@ export const InboxListSchema: Schema<InboxItem[]> = {
     }
     return ok(out);
   }
-};
+}
+
+export const InboxListSchema: Schema<InboxItem[]> = new InboxListSchemaImpl();
 
 // ---------- AgentTask ----------
 
@@ -299,38 +524,45 @@ export const EMPTY_AGENT_TASK: AgentTask = {
   cost_usd: null
 };
 
-export const AgentTaskSchema: Schema<AgentTask> = {
-  validate(value: unknown): ParseResult<AgentTask> {
+class AgentTaskSchemaImpl implements Schema<AgentTask> {
+  validate(value: JsonValue): ParseResult<AgentTask> {
     if (!isObject(value)) return fail('AgentTask: not an object');
-    const id = value['id'];
-    if (!isString(id)) return fail('AgentTask.id missing or not a string');
-    return ok({
+    const id = readRequiredId(value);
+    if (id === null) return fail('AgentTask.id missing or not a string');
+    const data: AgentTask = {
       id,
-      agent_id: readField(value, 'agent_id', isString, ''),
-      workspace_id: readField(value, 'workspace_id', isString, ''),
-      status: readField(value, 'status', isString, 'pending'),
-      failure_reason: readField(value, 'failure_reason', isNullableString, null),
-      prompt: readField(value, 'prompt', isString, ''),
-      started_at: readField(value, 'started_at', isString, ''),
-      finished_at: readField(value, 'finished_at', isNullableString, null),
-      duration_ms: readField(value, 'duration_ms', (v): v is number | null => v === null || isNumber(v), null),
-      cost_usd: readField(value, 'cost_usd', (v): v is number | null => v === null || isNumber(v), null)
-    });
+      agent_id: readString(value, 'agent_id', ''),
+      workspace_id: readString(value, 'workspace_id', ''),
+      status: readAgentTaskStatus(value, 'status', 'pending'),
+      failure_reason: readNullableString(value, 'failure_reason'),
+      prompt: readString(value, 'prompt', ''),
+      started_at: readString(value, 'started_at', ''),
+      finished_at: readNullableString(value, 'finished_at'),
+      duration_ms: readNullableNumber(value, 'duration_ms'),
+      cost_usd: readNullableNumber(value, 'cost_usd')
+    };
+    return ok(data);
   }
-};
+}
+
+export const AgentTaskSchema: Schema<AgentTask> = new AgentTaskSchemaImpl();
 
 export const EMPTY_AGENT_TASK_LIST: AgentTask[] = [];
-export const AgentTaskListSchema: Schema<AgentTask[]> = {
-  validate(value: unknown): ParseResult<AgentTask[]> {
+
+class AgentTaskListSchemaImpl implements Schema<AgentTask[]> {
+  validate(value: JsonValue): ParseResult<AgentTask[]> {
     if (!Array.isArray(value)) return fail('AgentTaskList: not an array');
+    const arr = value as Object[];
     const out: AgentTask[] = [];
-    for (const item of value) {
-      const r = AgentTaskSchema.validate(item);
+    for (let i = 0; i < arr.length; i++) {
+      const r = AgentTaskSchema.validate(arr[i] as JsonValue);
       if (r.success) out.push(r.data);
     }
     return ok(out);
   }
-};
+}
+
+export const AgentTaskListSchema: Schema<AgentTask[]> = new AgentTaskListSchemaImpl();
 
 // ---------- ChatMessage ----------
 
@@ -345,87 +577,118 @@ export const EMPTY_CHAT_MESSAGE: ChatMessage = {
   created_at: ''
 };
 
-export const ChatMessageSchema: Schema<ChatMessage> = {
-  validate(value: unknown): ParseResult<ChatMessage> {
+class ChatMessageSchemaImpl implements Schema<ChatMessage> {
+  validate(value: JsonValue): ParseResult<ChatMessage> {
     if (!isObject(value)) return fail('ChatMessage: not an object');
-    const id = value['id'];
-    if (!isString(id)) return fail('ChatMessage.id missing or not a string');
-    return ok({
+    const id = readRequiredId(value);
+    if (id === null) return fail('ChatMessage.id missing or not a string');
+    const data: ChatMessage = {
       id,
-      session_id: readField(value, 'session_id', isString, ''),
-      role: readField(value, 'role', isString, 'user'),
-      content: readField(value, 'content', isString, ''),
-      tool_name: readField(value, 'tool_name', isNullableString, null),
-      tool_call_id: readField(value, 'tool_call_id', isNullableString, null),
-      task_id: readField(value, 'task_id', isNullableString, null),
-      created_at: readField(value, 'created_at', isString, '')
-    });
+      session_id: readString(value, 'session_id', ''),
+      role: readChatRole(value, 'role', 'user'),
+      content: readString(value, 'content', ''),
+      tool_name: readNullableString(value, 'tool_name'),
+      tool_call_id: readNullableString(value, 'tool_call_id'),
+      task_id: readNullableString(value, 'task_id'),
+      created_at: readString(value, 'created_at', '')
+    };
+    return ok(data);
   }
-};
+}
+
+export const ChatMessageSchema: Schema<ChatMessage> = new ChatMessageSchemaImpl();
 
 export const EMPTY_CHAT_MESSAGE_LIST: ChatMessage[] = [];
-export const ChatMessageListSchema: Schema<ChatMessage[]> = {
-  validate(value: unknown): ParseResult<ChatMessage[]> {
+
+class ChatMessageListSchemaImpl implements Schema<ChatMessage[]> {
+  validate(value: JsonValue): ParseResult<ChatMessage[]> {
     if (!Array.isArray(value)) return fail('ChatMessageList: not an array');
+    const arr = value as Object[];
     const out: ChatMessage[] = [];
-    for (const item of value) {
-      const r = ChatMessageSchema.validate(item);
+    for (let i = 0; i < arr.length; i++) {
+      const r = ChatMessageSchema.validate(arr[i] as JsonValue);
       if (r.success) out.push(r.data);
     }
     return ok(out);
   }
-};
+}
+
+export const ChatMessageListSchema: Schema<ChatMessage[]> = new ChatMessageListSchemaImpl();
 
 // ---------- List envelopes ----------
+//
+// ArkTS forbids inline object-literal types, so each envelope
+// gets a named interface. The shapes mirror the iOS
+// `ListIssuesResponse` / `ListProjectsResponse` types in
+// `packages/core/types/issue.ts` and `project.ts` — keep them in
+// lockstep.
+
+export interface ListIssuesResponse {
+  issues: Issue[];
+  total: number;
+  page: number;
+  page_size: number;
+}
+
+export interface ListProjectsResponse {
+  projects: Project[];
+  total: number;
+}
 
 /** `GET /api/issues` response — `{ issues, total, page, page_size }`. */
-export const EMPTY_LIST_ISSUES_RESPONSE = { issues: [] as Issue[], total: 0, page: 1, page_size: 50 };
-export const ListIssuesResponseSchema: Schema<{ issues: Issue[]; total: number; page: number; page_size: number }> = {
-  validate(value: unknown): ParseResult<{ issues: Issue[]; total: number; page: number; page_size: number }> {
-    if (!isObject(value)) return fail('ListIssuesResponse: not an object');
-    const issuesRaw = value['issues'];
-    const issues: Issue[] = Array.isArray(issuesRaw)
-      ? issuesRaw.flatMap((it) => {
-          const r = IssueSchema.validate(it);
-          return r.success ? [r.data] : [];
-        })
-      : [];
-    return ok({
-      issues,
-      total: readField(value, 'total', isNumber, 0),
-      page: readField(value, 'page', isNumber, 1),
-      page_size: readField(value, 'page_size', isNumber, 50)
-    });
-  }
+export const EMPTY_LIST_ISSUES_RESPONSE: ListIssuesResponse = {
+  issues: [] as Issue[],
+  total: 0,
+  page: 1,
+  page_size: 50
 };
 
-export const EMPTY_LIST_PROJECTS_RESPONSE = { projects: [] as Project[], total: 0 };
-export const ListProjectsResponseSchema: Schema<{ projects: Project[]; total: number }> = {
-  validate(value: unknown): ParseResult<{ projects: Project[]; total: number }> {
-    if (!isObject(value)) return fail('ListProjectsResponse: not an object');
-    const projectsRaw = value['projects'];
-    const projects: Project[] = Array.isArray(projectsRaw)
-      ? projectsRaw.flatMap((it) => {
-          const r = ProjectSchema.validate(it);
-          return r.success ? [r.data] : [];
-        })
-      : [];
-    return ok({
-      projects,
-      total: readField(value, 'total', isNumber, 0)
-    });
+class ListIssuesResponseSchemaImpl implements Schema<ListIssuesResponse> {
+  validate(value: JsonValue): ParseResult<ListIssuesResponse> {
+    if (!isObject(value)) return fail('ListIssuesResponse: not an object');
+    const data: ListIssuesResponse = {
+      issues: readIssueList(value, 'issues'),
+      total: readNumber(value, 'total', 0),
+      page: readNumber(value, 'page', 1),
+      page_size: readNumber(value, 'page_size', 50)
+    };
+    return ok(data);
   }
+}
+
+export const ListIssuesResponseSchema: Schema<ListIssuesResponse> = new ListIssuesResponseSchemaImpl();
+
+export const EMPTY_LIST_PROJECTS_RESPONSE: ListProjectsResponse = {
+  projects: [] as Project[],
+  total: 0
 };
+
+class ListProjectsResponseSchemaImpl implements Schema<ListProjectsResponse> {
+  validate(value: JsonValue): ParseResult<ListProjectsResponse> {
+    if (!isObject(value)) return fail('ListProjectsResponse: not an object');
+    const data: ListProjectsResponse = {
+      projects: readProjectList(value, 'projects'),
+      total: readNumber(value, 'total', 0)
+    };
+    return ok(data);
+  }
+}
+
+export const ListProjectsResponseSchema: Schema<ListProjectsResponse> = new ListProjectsResponseSchemaImpl();
 
 export const EMPTY_COMMENT_LIST: Comment[] = [];
-export const CommentListSchema: Schema<Comment[]> = {
-  validate(value: unknown): ParseResult<Comment[]> {
+
+class CommentListSchemaImpl implements Schema<Comment[]> {
+  validate(value: JsonValue): ParseResult<Comment[]> {
     if (!Array.isArray(value)) return fail('CommentList: not an array');
+    const arr = value as Object[];
     const out: Comment[] = [];
-    for (const it of value) {
-      const r = CommentSchema.validate(it);
+    for (let i = 0; i < arr.length; i++) {
+      const r = CommentSchema.validate(arr[i] as JsonValue);
       if (r.success) out.push(r.data);
     }
     return ok(out);
   }
-};
+}
+
+export const CommentListSchema: Schema<Comment[]> = new CommentListSchemaImpl();

@@ -1,4 +1,4 @@
-import { THEME, ColorScheme } from '../../lib/theme';
+import { THEME, ColorScheme, themeTokens } from '../../lib/theme';
 
 @ComponentV2
 export struct Separator {
@@ -10,13 +10,13 @@ export struct Separator {
       Divider()
         .width('100%')
         .height(1)
-        .color(String(THEME[this.scheme].border))
+        .color(String(themeTokens(this.scheme).border))
     } else {
       Divider()
         .height('100%')
         .width(1)
         .vertical(true)
-        .color(String(THEME[this.scheme].border))
+        .color(String(themeTokens(this.scheme).border))
     }
   }
 }

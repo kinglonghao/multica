@@ -1,7 +1,7 @@
 import { appNavigation } from '../data/navigation';
 import { authStore } from '../data/auth';
 import { api } from '../data/api';
-import { THEME, ColorScheme, SPACE, RADIUS } from '../lib/theme';
+import { THEME, ColorScheme, SPACE, RADIUS, space, themeTokens } from '../lib/theme';
 import { MulticaText } from '../components/ui/Text';
 import { Header } from '../components/ui/Header';
 import { IconButton } from '../components/ui/IconButton';
@@ -53,49 +53,49 @@ export struct ProfilePage {
       Scroll() {
         Column() {
           Row() {
-            Avatar({ name: this.displayName || this.email, url: '', size: 64, scheme: this.scheme })
+            Avatar({ name: this.displayName || this.email, url: '', avatarSize: 64, scheme: this.scheme })
             Column() {
               MulticaText({
                 value: this.displayName || this.email,
                 scheme: this.scheme,
-                size: 'base',
+                textSize: 'base',
                 weight: 'medium',
                 color: 'foreground'
               })
               MulticaText({
                 value: this.email,
                 scheme: this.scheme,
-                size: 'xs',
+                textSize: 'xs',
                 color: 'mutedForeground'
               })
-                .margin({ top: SPACE['0.5'] })
+                .margin({ top: space('0.5') })
             }
             .layoutWeight(1)
-            .margin({ left: SPACE['3'] })
+            .margin({ left: space('3') })
             .alignItems(HorizontalAlign.Start)
           }
           .width('100%')
-          .padding(SPACE['4'])
+          .padding(space('4'))
           .alignItems(VerticalAlign.Center)
 
           MulticaText({
             value: 'Display name',
             scheme: this.scheme,
-            size: 'sm',
+            textSize: 'sm',
             weight: 'medium',
             color: 'foreground'
           })
             .width('100%')
-            .margin({ top: SPACE['2'] })
+            .margin({ top: space('2') })
 
           TextInput({ placeholder: 'Display name', text: this.displayName })
-            .placeholderColor(String(THEME[this.scheme].mutedForeground))
-            .fontColor(String(THEME[this.scheme].foreground))
-            .backgroundColor(String(THEME[this.scheme].card))
+            .placeholderColor(String(themeTokens(this.scheme).mutedForeground))
+            .fontColor(String(themeTokens(this.scheme).foreground))
+            .backgroundColor(String(themeTokens(this.scheme).card))
             .borderRadius(RADIUS.md)
-            .padding(SPACE['3'])
+            .padding(space('3'))
             .width('100%')
-            .margin({ top: SPACE['2'] })
+            .margin({ top: space('2') })
             .onChange((value: string) => {
               this.displayName = value;
               this.success = false;
@@ -105,20 +105,20 @@ export struct ProfilePage {
             MulticaText({
               value: this.errorMessage,
               scheme: this.scheme,
-              size: 'sm',
+              textSize: 'sm',
               color: 'destructive'
             })
-              .margin({ top: SPACE['2'] })
+              .margin({ top: space('2') })
           }
 
           if (this.success) {
             MulticaText({
               value: 'Profile updated',
               scheme: this.scheme,
-              size: 'sm',
+              textSize: 'sm',
               color: 'success'
             })
-              .margin({ top: SPACE['2'] })
+              .margin({ top: space('2') })
           }
 
           MulticaButton({
@@ -129,16 +129,16 @@ export struct ProfilePage {
             disabled: this.saving,
             onTap: () => { void this.save(); }
           })
-            .margin({ top: SPACE['4'] })
+            .margin({ top: space('4') })
         }
-        .padding(SPACE['4'])
+        .padding(space('4'))
       }
       .layoutWeight(1)
       .width('100%')
     }
     .width('100%')
     .height('100%')
-    .backgroundColor(String(THEME[this.scheme].background))
+    .backgroundColor(String(themeTokens(this.scheme).background))
   }
 
   @Builder BackButton() {

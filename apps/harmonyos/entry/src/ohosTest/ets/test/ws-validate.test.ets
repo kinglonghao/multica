@@ -10,13 +10,13 @@ export default function wsValidateTest(): void {
   describe('parseWSEnvelope', () => {
     it('returns a typed envelope for a well-formed JSON message', () => {
       const raw = JSON.stringify({
-        event: 'inbox:created',
+        event: 'inbox:new',
         payload: { id: '1', type: 'mention' },
         ts: '2026-06-09T00:00:00Z'
       });
       const out = parseWSEnvelope(raw);
       expect(out === null).assertEqual(false);
-      expect(out!.event).assertEqual('inbox:created');
+      expect(out!.event).assertEqual('inbox:new');
       expect(out!.ts).assertEqual('2026-06-09T00:00:00Z');
     });
 

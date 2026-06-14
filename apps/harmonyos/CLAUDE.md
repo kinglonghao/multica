@@ -97,7 +97,12 @@ verbatim:
 
 - **ArkTS** strict mode (TypeScript superset with stricter type
   rules).
-- **HarmonyOS 5.0** (API 12) minimum compatible SDK.
+- **HarmonyOS 6.1.0** (API 23) minimum compatible SDK. Bumped
+  from 5.0.0(12) on 2026-06-14 to match the primary test device
+  (HarmonyOS 6.1.0). The codebase was already using API 13+
+  surfaces (`SymbolGlyph` + `sys.symbol.*` glyphs in the tab bar),
+  so the API 12 floor was stale. Lowering the floor again would
+  require auditing those glyphs first.
 - **Stage model** with a single UIAbility (EntryAbility).
 - **ArkUI** declarative UI framework.
 - `@ohos.net.http` for HTTP, `@ohos.net.webSocket` for WS,

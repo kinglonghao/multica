@@ -1,17 +1,17 @@
-import { THEME, ColorScheme, RADIUS } from '../../lib/theme';
+import { THEME, ColorScheme, RADIUS, themeTokens } from '../../lib/theme';
 
 @ComponentV2
 export struct Skeleton {
   @Param scheme: ColorScheme = 'light';
-  @Param width: string | number = '100%';
-  @Param height: number = 16;
+  @Param skeletonWidth: Length = '100%';
+  @Param skeletonHeight: Length = 16;
   @Param radius: number = RADIUS.DEFAULT;
 
   build() {
     Stack()
-      .width(this.width)
-      .height(this.height)
-      .backgroundColor(String(THEME[this.scheme].border))
+      .width(this.skeletonWidth)
+      .height(this.skeletonHeight)
+      .backgroundColor(String(themeTokens(this.scheme).border))
       .borderRadius(this.radius)
       .opacity(0.6)
   }

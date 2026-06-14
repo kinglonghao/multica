@@ -80,10 +80,10 @@ export default function realtimeHooksTest(): void {
   });
 
   describe('useInboxRealtime', () => {
-    it('invalidates the inbox list cache on inbox:created', () => {
+    it('invalidates the inbox list cache on inbox:new', () => {
       queryClient.setQueryData<InboxItem[]>(['inbox', 'ws-1'], [{ id: 'i-1', type: 'mention', read: false, archived: false, workspace_id: 'ws-1', created_at: '', updated_at: '' }]);
       const unsub = useInboxRealtime();
-      fireEvent('inbox:created', { id: 'i-new' });
+      fireEvent('inbox:new', { id: 'i-new' });
       // After invalidation, get returns undefined; refetch would
       // repopulate.
       const after = queryClient.get<InboxItem[]>(['inbox', 'ws-1']);
@@ -169,7 +169,7 @@ export default function realtimeHooksTest(): void {
   describe('usePresenceRealtime', () => {
     it('writes the agent status to the presence cache', () => {
       const unsub = usePresenceRealtime();
-      fireEvent('presence:update', { agent_id: 'agent-1', status: 'busy' });
+      fireEvent('agent:status', { agent_id: 'agent-1', status: 'busy' });
       const after = queryClient.get<{ status: string }>(['agent-presence', 'agent-1']);
       expect(after?.data?.status).assertEqual('busy');
       unsub();

@@ -1,4 +1,4 @@
-import { QueryHandle, useQuery, QueryOptions, QueryKey } from './cache';
+import { QueryHandle, useQuery, QueryOptions, QueryKey, FetchContext } from './cache';
 import { api } from '../data/api';
 import { workspaceStore } from '../data/workspace';
 import { Issue, ListIssuesParams, ListIssuesResponse } from '../models/types';
@@ -25,7 +25,7 @@ export function useIssueListQuery(
   if (onUpdate) opts.onUpdate = onUpdate;
   return useQuery<ListIssuesResponse>(
     issueListKey(wsId, params),
-    ({ signal }) => api.listIssues(params, { signal }),
+    (ctx: FetchContext) => api.listIssues(params, { cancelToken: ctx.cancelToken }),
     opts
   );
 }
@@ -44,7 +44,7 @@ export function useIssueDetailQuery(
   if (onUpdate) opts.onUpdate = onUpdate;
   return useQuery<Issue>(
     issueDetailKey(wsId, id),
-    ({ signal }) => api.getIssue(id, { signal }),
+    (ctx: FetchContext) => api.getIssue(id, { cancelToken: ctx.cancelToken }),
     opts
   );
 }

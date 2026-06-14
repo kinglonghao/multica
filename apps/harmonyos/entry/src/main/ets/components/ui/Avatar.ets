@@ -5,30 +5,30 @@ import { MulticaText } from './Text';
 export struct Avatar {
   @Param name: string = '';
   @Param url: string = '';
-  @Param size: number = 36;
+  @Param avatarSize: number = 36;
   @Param scheme: ColorScheme = 'light';
 
   build() {
     Stack({ alignContent: Alignment.Center }) {
       if (this.url) {
         Image(this.url)
-          .width(this.size)
-          .height(this.size)
-          .borderRadius(this.size / 2)
+          .width(this.avatarSize)
+          .height(this.avatarSize)
+          .borderRadius(this.avatarSize / 2)
           .objectFit(ImageFit.Cover)
       } else {
         Stack({ alignContent: Alignment.Center }) {
           MulticaText({
             value: this.initials(this.name),
             scheme: this.scheme,
-            size: this.size > 56 ? 'xl' : this.size > 40 ? 'lg' : 'base',
+            textSize: this.avatarSize > 56 ? 'xl' : this.avatarSize > 40 ? 'lg' : 'base',
             weight: 'semibold',
             color: 'brandForeground'
           })
         }
-        .width(this.size)
-        .height(this.size)
-        .borderRadius(this.size / 2)
+        .width(this.avatarSize)
+        .height(this.avatarSize)
+        .borderRadius(this.avatarSize / 2)
         .backgroundColor(this.fallbackColor(this.name))
       }
     }

@@ -1,4 +1,4 @@
-import { appNavigation } from '../data/navigation';
+import { appNavigation, navParam } from '../data/navigation';
 import { useInboxQuery } from '../queries/inbox';
 import { useQuery, QueryHandle } from '../queries/cache';
 import { useInboxRealtime } from '../realtime/realtime-hooks';
@@ -6,9 +6,9 @@ import { api } from '../data/api';
 import { queryClient } from '../queries/cache';
 import { workspaceStore } from '../data/workspace';
 import { deduplicateInboxItems } from '../lib/inbox-display';
-import { markInboxRead } from '../mutations/inbox';
+import { markInboxRead, cloneInboxItem } from '../mutations/inbox';
 import { InboxItem, Issue } from '../models/types';
-import { THEME, ColorScheme, SPACE } from '../lib/theme';
+import { THEME, ColorScheme, SPACE, space, themeTokens } from '../lib/theme';
 import { MulticaText } from '../components/ui/Text';
 import { Skeleton } from '../components/ui/Skeleton';
 import { Header } from '../components/ui/Header';
@@ -36,9 +36,10 @@ export struct InboxPage {
       void this.hydrateIssueCache();
     });
     void this.hydrateIssueCache();
-    // Subscribe to inbox:created / inbox:updated / inbox:deleted
-    // events for the current workspace. The hook invalidates
-    // the inbox list cache so the next subscriber refetches.
+    // Subscribe to the iOS-parity inbox events
+    // (inbox:new/read/archived + batch variants) for the current
+    // workspace. The hook invalidates the inbox list cache so the
+    // next subscriber refetches.
     this.wsUnsub = useInboxRealtime();
   }
 
@@ -104,25 +105,20 @@ export struct InboxPage {
       })
 
       if (!this.query) {
-        return this.EmptyState();
-      }
-      const state = this.query.getState();
-      if (state.isLoading) {
+        this.EmptyState()
+      } else if (this.query.getState().isLoading) {
         this.LoadingState()
-      } else if (state.error) {
-        this.ErrorState(state.error!.message)
+      } else if (this.query.getState().error) {
+        this.ErrorState(this.query.getState().error!.message)
+      } else if (deduplicateInboxItems(this.query.getState().data ?? []).length === 0) {
+        this.EmptyState()
       } else {
-        const items = deduplicateInboxItems(state.data ?? []);
-        if (items.length === 0) {
-          this.EmptyState()
-        } else {
-          this.List(items)
-        }
+        this.List(deduplicateInboxItems(this.query.getState().data ?? []))
       }
     }
     .width('100%')
     .height('100%')
-    .backgroundColor(String(THEME[this.scheme].background))
+    .backgroundColor(String(themeTokens(this.scheme).background))
   }
 
   @Builder ActionsRow() {
@@ -140,17 +136,17 @@ export struct InboxPage {
     Column() {
       ForEach([1, 2, 3, 4, 5, 6], (i: number) => {
         Row() {
-          Skeleton({ scheme: this.scheme, width: 36, height: 36, radius: 18 })
+          Skeleton({ scheme: this.scheme, skeletonWidth: 36, skeletonHeight: 36, radius: 18 })
           Column() {
-            Skeleton({ scheme: this.scheme, width: '70%', height: 14, radius: 4 })
-            Skeleton({ scheme: this.scheme, width: '40%', height: 12, radius: 4 })
-              .margin({ top: SPACE['1.5'] })
+            Skeleton({ scheme: this.scheme, skeletonWidth: '70%', skeletonHeight: 14, radius: 4 })
+            Skeleton({ scheme: this.scheme, skeletonWidth: '40%', skeletonHeight: 12, radius: 4 })
+              .margin({ top: space('1.5') })
           }
           .layoutWeight(1)
-          .margin({ left: SPACE['3'] })
+          .margin({ left: space('3') })
           .alignItems(HorizontalAlign.Start)
         }
-        .padding({ left: SPACE['4'], right: SPACE['4'], top: SPACE['3'], bottom: SPACE['3'] })
+        .padding({ left: space('4'), right: space('4'), top: space('3'), bottom: space('3') })
       })
     }
   }
@@ -160,10 +156,10 @@ export struct InboxPage {
       MulticaText({
         value: `Failed to load inbox: ${message}`,
         scheme: this.scheme,
-        size: 'sm',
+        textSize: 'sm',
         color: 'destructive'
       })
-        .padding(SPACE['4'])
+        .padding(space('4'))
     }
   }
 
@@ -173,20 +169,20 @@ export struct InboxPage {
         MulticaText({
           value: 'Inbox zero',
           scheme: this.scheme,
-          size: 'base',
+          textSize: 'base',
           weight: 'medium',
           color: 'foreground',
-          textAlign: TextAlign.Center
+          textAlign: 'center'
         })
         MulticaText({
           value: 'When someone @mentions you, assigns an issue, or an agent finishes a task, it shows up here.',
           scheme: this.scheme,
-          size: 'sm',
+          textSize: 'sm',
           color: 'mutedForeground',
-          textAlign: TextAlign.Center
+          textAlign: 'center'
         })
-          .margin({ top: SPACE['2'] })
-          .padding({ left: SPACE['6'], right: SPACE['6'] })
+          .margin({ top: space('2') })
+          .padding({ left: space('6'), right: space('6') })
       }
     }
     .layoutWeight(1)
@@ -224,14 +220,19 @@ export struct InboxPage {
       void markInboxRead(item.id);
     }
     if (item.issue_id) {
-      appNavigation.pushName('IssueDetailPage', { id: item.issue_id });
+      appNavigation.pushName('IssueDetailPage', navParam('id', item.issue_id));
     }
   }
 
   private async archiveAllRead(): Promise<void> {
     queryClient.setQueryData(['inbox', workspaceStore.currentId], (prev: InboxItem[] | undefined) => {
-      if (!prev) return prev;
-      return prev.map(i => i.read ? { ...i, archived: true } : i);
+      if (!prev) return [];
+      return prev.map((i): InboxItem => {
+        if (!i.read) return i;
+        const copy = cloneInboxItem(i);
+        copy.archived = true;
+        return copy;
+      });
     });
     try {
       await api.archiveAllReadInbox();

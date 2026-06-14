@@ -42,6 +42,29 @@ interface PreferencesSnapshot {
   themePref: 'light' | 'dark' | 'system';
 }
 
+/** Shape passed to setAuth. Named interface because ArkTS forbids
+ *  anonymous object-literal types in parameter position. */
+interface StoredUser {
+  id: string;
+  email: string;
+  display: string | null;
+  avatar: string | null;
+}
+
+/** ArkTS forbids object spread; copy field-by-field instead. */
+function cloneSnapshot(s: PreferencesSnapshot): PreferencesSnapshot {
+  return {
+    authToken: s.authToken,
+    userId: s.userId,
+    userEmail: s.userEmail,
+    userDisplay: s.userDisplay,
+    userAvatar: s.userAvatar,
+    workspaceId: s.workspaceId,
+    workspaceSlug: s.workspaceSlug,
+    themePref: s.themePref,
+  };
+}
+
 const EMPTY_SNAPSHOT: PreferencesSnapshot = {
   authToken: null,
   userId: null,
@@ -55,7 +78,7 @@ const EMPTY_SNAPSHOT: PreferencesSnapshot = {
 
 class PreferencesImpl {
   private store: preferences.Preferences | null = null;
-  private snapshot: PreferencesSnapshot = { ...EMPTY_SNAPSHOT };
+  private snapshot: PreferencesSnapshot = cloneSnapshot(EMPTY_SNAPSHOT);
   private readonly listeners = new Set<(s: PreferencesSnapshot) => void>();
 
   async init(context: common.Context): Promise<void> {
@@ -65,8 +88,8 @@ class PreferencesImpl {
   }
 
   private async readSnapshot(): Promise<PreferencesSnapshot> {
-    if (!this.store) return { ...EMPTY_SNAPSHOT };
-    const out: PreferencesSnapshot = { ...EMPTY_SNAPSHOT };
+    if (!this.store) return cloneSnapshot(EMPTY_SNAPSHOT);
+    const out: PreferencesSnapshot = cloneSnapshot(EMPTY_SNAPSHOT);
     out.authToken = await this.store.get(KEY_AUTH_TOKEN, '') as string || null;
     out.userId = await this.store.get(KEY_USER_ID, '') as string || null;
     out.userEmail = await this.store.get(KEY_USER_EMAIL, '') as string || null;
@@ -79,8 +102,22 @@ class PreferencesImpl {
     return out;
   }
 
-  get<K extends keyof PreferencesSnapshot>(key: K): PreferencesSnapshot[K] {
-    return this.snapshot[key];
+  /**
+   * Synchronous read of a single field. ArkTS forbids generic
+   * indexed access (`snapshot[key]` with `K extends keyof`), so the
+   * key is a literal matched by an explicit switch. All call sites
+   * read string|null fields; themePref is not read through this API.
+   */
+  get(key: 'authToken' | 'userId' | 'userEmail' | 'userDisplay' | 'userAvatar' | 'workspaceId' | 'workspaceSlug'): string | null {
+    switch (key) {
+      case 'authToken': return this.snapshot.authToken;
+      case 'userId': return this.snapshot.userId;
+      case 'userEmail': return this.snapshot.userEmail;
+      case 'userDisplay': return this.snapshot.userDisplay;
+      case 'userAvatar': return this.snapshot.userAvatar;
+      case 'workspaceId': return this.snapshot.workspaceId;
+      case 'workspaceSlug': return this.snapshot.workspaceSlug;
+    }
   }
 
   subscribe(listener: (s: PreferencesSnapshot) => void): () => void {
@@ -94,7 +131,7 @@ class PreferencesImpl {
     }
   }
 
-  async setAuth(token: string, user: { id: string; email: string; display: string | null; avatar: string | null }): Promise<void> {
+  async setAuth(token: string, user: StoredUser): Promise<void> {
     if (!this.store) return;
     await this.store.put(KEY_AUTH_TOKEN, token);
     await this.store.put(KEY_USER_ID, user.id);
@@ -102,7 +139,13 @@ class PreferencesImpl {
     await this.store.put(KEY_USER_DISPLAY, user.display ?? '');
     await this.store.put(KEY_USER_AVATAR, user.avatar ?? '');
     await this.store.flush();
-    this.snapshot = { ...this.snapshot, authToken: token, userId: user.id, userEmail: user.email, userDisplay: user.display, userAvatar: user.avatar };
+    const next = cloneSnapshot(this.snapshot);
+    next.authToken = token;
+    next.userId = user.id;
+    next.userEmail = user.email;
+    next.userDisplay = user.display;
+    next.userAvatar = user.avatar;
+    this.snapshot = next;
     this.emit();
   }
 
@@ -111,7 +154,10 @@ class PreferencesImpl {
     await this.store.put(KEY_WS_ID, id ?? '');
     await this.store.put(KEY_WS_SLUG, slug ?? '');
     await this.store.flush();
-    this.snapshot = { ...this.snapshot, workspaceId: id, workspaceSlug: slug };
+    const next = cloneSnapshot(this.snapshot);
+    next.workspaceId = id;
+    next.workspaceSlug = slug;
+    this.snapshot = next;
     this.emit();
   }
 
@@ -119,7 +165,9 @@ class PreferencesImpl {
     if (!this.store) return;
     await this.store.put(KEY_THEME_PREF, pref);
     await this.store.flush();
-    this.snapshot = { ...this.snapshot, themePref: pref };
+    const next = cloneSnapshot(this.snapshot);
+    next.themePref = pref;
+    this.snapshot = next;
     this.emit();
   }
 
@@ -130,7 +178,7 @@ class PreferencesImpl {
       await this.store.delete(k);
     }
     await this.store.flush();
-    this.snapshot = { ...EMPTY_SNAPSHOT };
+    this.snapshot = cloneSnapshot(EMPTY_SNAPSHOT);
     this.emit();
   }
 }

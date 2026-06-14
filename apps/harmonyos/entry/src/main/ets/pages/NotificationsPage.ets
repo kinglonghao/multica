@@ -1,8 +1,8 @@
 import { appNavigation } from '../data/navigation';
 import { api } from '../data/api';
-import { useQuery, QueryHandle } from '../queries/cache';
+import { useQuery, QueryHandle, FetchContext } from '../queries/cache';
 import { NotificationPreferences, NotificationPreference } from '../models/types';
-import { THEME, ColorScheme, SPACE, RADIUS } from '../lib/theme';
+import { THEME, ColorScheme, SPACE, RADIUS, space, themeTokens } from '../lib/theme';
 import { MulticaText } from '../components/ui/Text';
 import { Header } from '../components/ui/Header';
 import { IconButton } from '../components/ui/IconButton';
@@ -32,7 +32,7 @@ export struct NotificationsPage {
     this.scheme = this.detectScheme();
     this.query = useQuery<NotificationPreferences>(
       PREFS_QUERY_KEY,
-      ({ signal }) => api.getNotificationPreferences({ signal }),
+      (ctx: FetchContext) => api.getNotificationPreferences({ cancelToken: ctx.cancelToken }),
       {
         staleTimeMs: PREFS_STALE_MS,
         onUpdate: () => {
@@ -61,7 +61,10 @@ export struct NotificationsPage {
    *  holds the snapshot that the page renders. */
   private togglePref(index: number, next: boolean): void {
     const before = this.prefs;
-    const after = before.map((p, i) => i === index ? { ...p, enabled: next } : p);
+    const after = before.map((p, i): NotificationPreference => {
+      if (i !== index) return p;
+      return { channel: p.channel, category: p.category, enabled: next };
+    });
     this.prefs = after;
     if (this.query?.getState().data) {
       this.query.getState().data!.preferences = after;
@@ -76,7 +79,7 @@ export struct NotificationsPage {
     this.success = false;
     try {
       // Send the locally-edited prefs back, NOT a fresh GET.
-      const updated: NotificationPreferences = { ...data, preferences: this.prefs };
+      const updated: NotificationPreferences = { workspace_id: data.workspace_id, preferences: this.prefs };
       const saved = await api.updateNotificationPreferences(updated);
       this.success = true;
       if (this.query?.getState().data) {
@@ -93,6 +96,10 @@ export struct NotificationsPage {
     }
   }
 
+  private queryState() {
+    return this.query ? this.query.getState() : null;
+  }
+
   build() {
     Column() {
       Header({
@@ -102,18 +109,16 @@ export struct NotificationsPage {
         right: this.SaveButton()
       })
 
-      if (!this.query) {
-        return;
-      }
-      const state = this.query.getState();
-      if (state.isLoading) {
+      if (!this.queryState()) {
+        Blank().layoutWeight(1)
+      } else if (this.queryState()!.isLoading) {
         Column() {
           ForEach([1, 2, 3, 4], () => {
-            Skeleton({ scheme: this.scheme, width: '90%', height: 56, radius: 8 })
-              .margin({ top: SPACE['3'] })
+            Skeleton({ scheme: this.scheme, skeletonWidth: '90%', skeletonHeight: 56, radius: 8 })
+              .margin({ top: space('3') })
           })
         }
-        .padding(SPACE['4'])
+        .padding(space('4'))
       } else {
         Column() {
           // Render from this.prefs (immutable snapshot), not the cache
@@ -126,17 +131,17 @@ export struct NotificationsPage {
                 MulticaText({
                   value: pref.category,
                   scheme: this.scheme,
-                  size: 'base',
+                  textSize: 'base',
                   weight: 'medium',
                   color: 'foreground'
                 })
                 MulticaText({
                   value: pref.channel,
                   scheme: this.scheme,
-                  size: 'xs',
+                  textSize: 'xs',
                   color: 'mutedForeground'
                 })
-                  .margin({ top: SPACE['0.5'] })
+                  .margin({ top: space('0.5') })
               }
               .layoutWeight(1)
               .alignItems(HorizontalAlign.Start)
@@ -147,20 +152,20 @@ export struct NotificationsPage {
                 })
             }
             .width('100%')
-            .padding(SPACE['4'])
-            .backgroundColor(String(THEME[this.scheme].card))
+            .padding(space('4'))
+            .backgroundColor(String(themeTokens(this.scheme).card))
             .borderRadius(RADIUS.md)
-            .margin({ top: SPACE['2'] })
+            .margin({ top: space('2') })
           })
 
           if (this.errorMessage) {
             MulticaText({
               value: this.errorMessage,
               scheme: this.scheme,
-              size: 'sm',
+              textSize: 'sm',
               color: 'destructive'
             })
-              .margin({ top: SPACE['2'] })
+              .margin({ top: space('2') })
               .width('100%')
           }
 
@@ -168,18 +173,18 @@ export struct NotificationsPage {
             MulticaText({
               value: 'Saved',
               scheme: this.scheme,
-              size: 'sm',
+              textSize: 'sm',
               color: 'success'
             })
-              .margin({ top: SPACE['2'] })
+              .margin({ top: space('2') })
           }
         }
-        .padding(SPACE['4'])
+        .padding(space('4'))
       }
     }
     .width('100%')
     .height('100%')
-    .backgroundColor(String(THEME[this.scheme].background))
+    .backgroundColor(String(themeTokens(this.scheme).background))
   }
 
   @Builder BackButton() {
@@ -196,7 +201,7 @@ export struct NotificationsPage {
       label: this.saving ? 'Saving…' : 'Save',
       scheme: this.scheme,
       variant: 'primary',
-      size: 'sm',
+      buttonSize: 'sm',
       disabled: this.saving,
       onTap: () => { void this.save(); }
     })

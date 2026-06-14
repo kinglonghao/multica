@@ -1,6 +1,6 @@
 import { appNavigation } from '../data/navigation';
 import { authStore } from '../data/auth';
-import { THEME, ColorScheme, SPACE, RADIUS } from '../lib/theme';
+import { THEME, ColorScheme, SPACE, RADIUS, space, themeTokens, fontSize } from '../lib/theme';
 import { MulticaText } from '../components/ui/Text';
 import { MulticaButton } from '../components/ui/Button';
 
@@ -41,7 +41,7 @@ export struct VerifyPage {
       // WorkspaceLayout re-render with the now-authed state. Using
       // replaceName('WorkspaceLayout') was a no-op because
       // WorkspaceLayout isn't in the destination builder.
-      appNavigation.clearStack();
+      appNavigation.clear();
     } catch (err) {
       this.errorMessage = err instanceof Error ? err.message : 'Verification failed';
     } finally {
@@ -55,26 +55,26 @@ export struct VerifyPage {
         MulticaText({
           value: 'Enter verification code',
           scheme: this.scheme,
-          size: 'xl',
+          textSize: 'xl',
           weight: 'bold',
           color: 'foreground'
         })
         MulticaText({
           value: `Sent to ${this.email}`,
           scheme: this.scheme,
-          size: 'sm',
+          textSize: 'sm',
           color: 'mutedForeground'
         })
-          .margin({ top: SPACE['2'] })
+          .margin({ top: space('2') })
 
         TextInput({ placeholder: '000000', text: this.code })
-          .placeholderColor(String(THEME[this.scheme].mutedForeground))
-          .fontColor(String(THEME[this.scheme].foreground))
-          .backgroundColor(String(THEME[this.scheme].card))
+          .placeholderColor(String(themeTokens(this.scheme).mutedForeground))
+          .fontColor(String(themeTokens(this.scheme).foreground))
+          .backgroundColor(String(themeTokens(this.scheme).card))
           .borderRadius(RADIUS.md)
-          .padding(SPACE['3'])
+          .padding(space('3'))
           .width('100%')
-          .margin({ top: SPACE['8'] })
+          .margin({ top: space('8') })
           .type(InputType.Number)
           .maxLength(6)
           .fontSize(24)
@@ -88,10 +88,10 @@ export struct VerifyPage {
           MulticaText({
             value: this.errorMessage,
             scheme: this.scheme,
-            size: 'sm',
+            textSize: 'sm',
             color: 'destructive'
           })
-            .margin({ top: SPACE['2'] })
+            .margin({ top: space('2') })
         }
 
         MulticaButton({
@@ -102,7 +102,7 @@ export struct VerifyPage {
           disabled: this.loading,
           onTap: () => { void this.verify(); }
         })
-          .margin({ top: SPACE['4'] })
+          .margin({ top: space('4') })
 
         MulticaButton({
           label: 'Back',
@@ -111,14 +111,14 @@ export struct VerifyPage {
           fullWidth: true,
           onTap: () => { appNavigation.pop(); }
         })
-          .margin({ top: SPACE['2'] })
+          .margin({ top: space('2') })
       }
       .width('100%')
-      .padding(SPACE['6'])
+      .padding(space('6'))
       .constraintSize({ maxWidth: 480 })
     }
     .width('100%')
     .height('100%')
-    .backgroundColor(String(THEME[this.scheme].background))
+    .backgroundColor(String(themeTokens(this.scheme).background))
   }
 }

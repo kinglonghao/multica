@@ -1,5 +1,5 @@
 import { Issue } from '../../models/types';
-import { ColorScheme, SPACE, THEME } from '../../lib/theme';
+import { ColorScheme, SPACE, THEME, space } from '../../lib/theme';
 import { timeAgo } from '../../lib/utils';
 import { MulticaText } from '../ui/Text';
 import { StatusIcon } from '../ui/StatusIcon';
@@ -14,20 +14,20 @@ export struct IssueRow {
   build() {
     Row() {
       Column() {
-        StatusIcon({ status: this.issue.status, scheme: this.scheme, size: 14 })
-        PriorityIcon({ priority: this.issue.priority, scheme: this.scheme, size: 14 })
-          .margin({ top: SPACE['1.5'] })
+        StatusIcon({ status: this.issue.status, scheme: this.scheme, iconSize: 14 })
+        PriorityIcon({ priority: this.issue.priority, scheme: this.scheme, iconSize: 14 })
+          .margin({ top: space('1.5') })
       }
       .alignItems(HorizontalAlign.Center)
       .width(20)
-      .margin({ right: SPACE['2'] })
+      .margin({ right: space('2') })
 
       Column() {
         Row() {
           MulticaText({
             value: this.issue.identifier,
             scheme: this.scheme,
-            size: 'xs',
+            textSize: 'xs',
             color: 'mutedForeground',
             weight: 'medium'
           })
@@ -35,7 +35,7 @@ export struct IssueRow {
           MulticaText({
             value: timeAgo(this.issue.updated_at),
             scheme: this.scheme,
-            size: 'xs',
+            textSize: 'xs',
             color: 'mutedForeground'
           })
         }
@@ -44,23 +44,23 @@ export struct IssueRow {
         MulticaText({
           value: this.issue.title,
           scheme: this.scheme,
-          size: 'base',
+          textSize: 'base',
           weight: 'medium',
           color: 'foreground',
           maxLines: 2,
           overflow: 'ellipsis'
         })
-          .margin({ top: SPACE['1'] })
+          .margin({ top: space('1') })
           .width('100%')
 
         if (this.issue.assignee_name) {
           MulticaText({
             value: `Assigned to ${this.issue.assignee_name}`,
             scheme: this.scheme,
-            size: 'xs',
+            textSize: 'xs',
             color: 'mutedForeground'
           })
-            .margin({ top: SPACE['1'] })
+            .margin({ top: space('1') })
         }
       }
       .layoutWeight(1)
@@ -68,10 +68,10 @@ export struct IssueRow {
     }
     .width('100%')
     .padding({
-      left: SPACE['4'],
-      right: SPACE['4'],
-      top: SPACE['3'],
-      bottom: SPACE['3']
+      left: space('4'),
+      right: space('4'),
+      top: space('3'),
+      bottom: space('3')
     })
     .onClick(() => { this.onPress(); })
   }

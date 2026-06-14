@@ -1,0 +1,9 @@
+{
+  "name": "entry",
+  "version": "1.0.0",
+  "description": "Multica HarmonyOS main HAP module",
+  "main": "",
+  "author": "",
+  "license": "",
+  "dependencies": {}
+}

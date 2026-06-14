@@ -1,4 +1,4 @@
-import { QueryHandle, useQuery, QueryOptions, QueryKey } from './cache';
+import { QueryHandle, useQuery, QueryOptions, QueryKey, FetchContext } from './cache';
 import { api } from '../data/api';
 import { workspaceStore } from '../data/workspace';
 import { InboxItem } from '../models/types';
@@ -20,7 +20,7 @@ export function useInboxQuery(onUpdate?: () => void): QueryHandle<InboxItem[]> {
   if (onUpdate) opts.onUpdate = onUpdate;
   return useQuery<InboxItem[]>(
     inboxQueryKey(wsId),
-    ({ signal }) => api.listInbox({ signal }),
+    (ctx: FetchContext) => api.listInbox({ cancelToken: ctx.cancelToken }),
     opts
   );
 }

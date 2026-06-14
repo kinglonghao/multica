@@ -1,5 +1,5 @@
 import { InboxItem } from '../../models/types';
-import { ColorScheme, THEME, SPACE } from '../../lib/theme';
+import { ColorScheme, THEME, SPACE, space, themeTokens } from '../../lib/theme';
 import { timeAgo } from '../../lib/utils';
 import { MulticaText } from '../ui/Text';
 import { Avatar } from '../ui/Avatar';
@@ -23,20 +23,18 @@ export struct InboxRow {
             .borderRadius(18)
             .objectFit(ImageFit.Cover)
         } else {
-          Avatar({ name: this.item.actor_name ?? '·', size: 36, scheme: this.scheme })
+          Avatar({ name: this.item.actor_name ?? '·', avatarSize: 36, scheme: this.scheme })
         }
       }
       .width(40)
       .height(40)
-      .alignItems(HorizontalAlign.Center)
-      .justifyContent(FlexAlign.Center)
 
       Column() {
         Row() {
           MulticaText({
             value: this.summary(),
             scheme: this.scheme,
-            size: 'sm',
+            textSize: 'sm',
             weight: this.item.read ? 'normal' : 'medium',
             color: 'foreground',
             maxLines: 2,
@@ -46,7 +44,7 @@ export struct InboxRow {
           MulticaText({
             value: timeAgo(this.item.created_at),
             scheme: this.scheme,
-            size: 'xs',
+            textSize: 'xs',
             color: 'mutedForeground'
           })
         }
@@ -55,25 +53,25 @@ export struct InboxRow {
 
         if (this.issueTitle) {
           Row() {
-            StatusIcon({ status: 'todo', scheme: this.scheme, size: 12 })
+            StatusIcon({ status: 'todo', scheme: this.scheme, iconSize: 12 })
             MulticaText({
               value: `${this.issueIdentifier} · ${this.issueTitle}`,
               scheme: this.scheme,
-              size: 'xs',
+              textSize: 'xs',
               color: 'mutedForeground',
               maxLines: 1,
               overflow: 'ellipsis'
             })
               .layoutWeight(1)
-              .margin({ left: SPACE['1.5'] })
+              .margin({ left: space('1.5') })
           }
           .width('100%')
-          .margin({ top: SPACE['1'] })
+          .margin({ top: space('1') })
           .alignItems(VerticalAlign.Center)
         }
       }
       .layoutWeight(1)
-      .margin({ left: SPACE['3'] })
+      .margin({ left: space('3') })
       .alignItems(HorizontalAlign.Start)
 
       if (!this.item.read) {
@@ -81,18 +79,18 @@ export struct InboxRow {
           .width(8)
           .height(8)
           .borderRadius(4)
-          .backgroundColor(String(THEME[this.scheme].brand))
-          .margin({ left: SPACE['2'] })
+          .backgroundColor(String(themeTokens(this.scheme).brand))
+          .margin({ left: space('2') })
       }
     }
     .width('100%')
     .padding({
-      left: SPACE['4'],
-      right: SPACE['4'],
-      top: SPACE['3'],
-      bottom: SPACE['3']
+      left: space('4'),
+      right: space('4'),
+      top: space('3'),
+      bottom: space('3')
     })
-    .backgroundColor(this.item.read ? 'transparent' : String(THEME[this.scheme].card))
+    .backgroundColor(this.item.read ? 'transparent' : String(themeTokens(this.scheme).card))
     .onClick(() => { this.onPress(); })
   }
 

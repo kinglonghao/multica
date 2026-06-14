@@ -16,6 +16,7 @@ import {
   InboxItem,
   Issue,
   IssueLabelsResponse,
+  IssueReaction,
   Label,
   ListIssuesParams,
   ListIssuesResponse,
@@ -39,7 +40,8 @@ import {
   User,
   Workspace
 } from '../models/types';
-import { parseWithFallback } from '../lib/parse-response';
+import { ParseOptions, parseWithFallback } from '../lib/parse-response';
+import { CancelToken } from '../queries/cache';
 import {
   AgentTaskListSchema,
   ChatMessageListSchema,
@@ -81,9 +83,8 @@ import {
  *   - @ohos.net.http is the system HTTP client. We build a new request per
  *     call (the API is request-scoped; no persistent connection pooling).
  *   - 30s hard timeout is enforced via a Promise.race — see FETCH_TIMEOUT_MS.
- *   - AbortSignal-like cancellation: the request is destroyed in the cleanup
- *     branch of the race; on normal completion we destroy it eagerly to free
- *     sockets.
+ *   - CancelToken-based cancellation: the request is destroyed when the
+ *     cache's CancelToken flips to aborted (or on the 30s timeout).
  */
 
 const API_URL = 'https://api.multica.ai'; // Overridden in setBaseUrl() — see app init.
@@ -115,34 +116,111 @@ export interface ApiClientOptions {
   onUnauthorized?: () => void;
 }
 
+interface RequestHeaders {
+  'X-Request-ID': string;
+  'Content-Type': string;
+  'Accept': string;
+  'Authorization'?: string;
+  'X-Workspace-Slug'?: string;
+}
+
 interface RequestOpts {
-  signal?: AbortSignal;
+  cancelToken?: CancelToken;
   endpoint?: string;
+}
+
+interface UpdateMeRequest {
+  display_name?: string;
+  avatar_url?: string;
+}
+
+interface EmojiRequest {
+  emoji: string;
+}
+
+interface SendChatMessageRequest {
+  content: string;
+}
+
+interface PinRequest {
+  item_id: string;
+  item_type: 'issue' | 'project' | 'doc';
+}
+
+interface UploadFileAsset {
+  uri: string;
+  name: string;
+  type: string;
+}
+
+interface CommentBodyRequest {
+  body: string;
+}
+
+interface TimelineResponse {
+  entries: Object[];
+}
+
+type RequestBody = Object | string | number | boolean | null;
+
+interface RequestOtpBody {
+  email: string;
+}
+
+interface VerifyOtpBody {
+  email: string;
+  code: string;
 }
 
 function rid(): string {
   return Math.random().toString(36).slice(2, 10) + Date.now().toString(36);
 }
 
+function appendQueryPart(parts: string[], key: string, value: string): void {
+  parts.push(`${encodeURIComponent(key)}=${encodeURIComponent(value)}`);
+}
+
+function buildIssueQueryString(params: ListIssuesParams): string {
+  const parts: string[] = [];
+
+  if (params.status) {
+    const statuses = Array.isArray(params.status) ? params.status : [params.status];
+    statuses.forEach((status) => appendQueryPart(parts, 'status', status));
+  }
+  if (params.priority) {
+    const priorities = Array.isArray(params.priority) ? params.priority : [params.priority];
+    priorities.forEach((priority) => appendQueryPart(parts, 'priority', priority));
+  }
+  if (params.assignee_id) appendQueryPart(parts, 'assignee_id', params.assignee_id);
+  if (params.project_id) appendQueryPart(parts, 'project_id', params.project_id);
+  if (params.search) appendQueryPart(parts, 'search', params.search);
+  if (params.page) appendQueryPart(parts, 'page', String(params.page));
+  if (params.page_size) appendQueryPart(parts, 'page_size', String(params.page_size));
+
+  return parts.join('&');
+}
+
 class ApiClient {
   private options: ApiClientOptions = {};
 
   setOptions(opts: ApiClientOptions): void {
-    this.options = { ...this.options, ...opts };
+    if (opts.onUnauthorized !== undefined) {
+      this.options.onUnauthorized = opts.onUnauthorized;
+    }
   }
 
-  private async request<T>(method: string, path: string, body?: unknown, opts: RequestOpts = {}): Promise<T> {
+  private async request<T>(method: string, path: string, body?: RequestBody, opts: RequestOpts = {}): Promise<T> {
     const id = rid();
     const url = `${BASE_URL}${path}`;
     const token = Preferences.get('authToken');
     const slug = Preferences.get('workspaceSlug');
-    const headers: Record<string, string> = {
+    const headers: RequestHeaders = {
       'X-Request-ID': id,
       'Content-Type': 'application/json',
-      'Accept': 'application/json'
+      'Accept': 'application/json',
+      'Authorization': token ? `Bearer ${token}` : undefined,
+      'X-Workspace-Slug': slug ?? undefined
     };
-    if (token) headers['Authorization'] = `Bearer ${token}`;
-    if (slug) headers['X-Workspace-Slug'] = slug;
 
     console.info(`[api] → ${method} ${path} rid=${id}`);
     const start = Date.now();
@@ -156,7 +234,7 @@ class ApiClient {
       readTimeout: FETCH_TIMEOUT_MS
     });
 
-    let timeoutHandle: ReturnType<typeof setTimeout> | null = null;
+    let timeoutHandle: number | null = null;
     const timeoutPromise = new Promise<never>((_, reject) => {
       timeoutHandle = setTimeout(() => {
         httpRequest.destroy();
@@ -165,8 +243,8 @@ class ApiClient {
     });
 
     let externalAbortHandler: (() => void) | null = null;
-    if (opts.signal) {
-      if (opts.signal.aborted) {
+    if (opts.cancelToken) {
+      if (opts.cancelToken.aborted) {
         httpRequest.destroy();
         if (timeoutHandle) clearTimeout(timeoutHandle);
         throw new ApiError('Aborted', 0);
@@ -175,15 +253,15 @@ class ApiClient {
         httpRequest.destroy();
         if (timeoutHandle) clearTimeout(timeoutHandle);
       };
-      opts.signal.addEventListener('abort', externalAbortHandler);
+      opts.cancelToken.onAbort(externalAbortHandler);
     }
 
     try {
       const response = await Promise.race([requestTask, timeoutPromise]);
       if (timeoutHandle) clearTimeout(timeoutHandle);
-      if (externalAbortHandler && opts.signal) {
-        opts.signal.removeEventListener('abort', externalAbortHandler);
-      }
+      // CancelToken has no remove-listener API; the handler is a
+      // no-op once the request has settled (httpRequest is already
+      // destroyed below), so there is nothing to detach.
       httpRequest.destroy();
 
       const status = response.responseCode;
@@ -200,7 +278,7 @@ class ApiClient {
         throw new ApiError(`HTTP ${status}`, status, rawBody);
       }
       if (status === 204) {
-        return undefined as unknown as T;
+        return null as T;
       }
       try {
         return JSON.parse(rawBody) as T;
@@ -209,29 +287,30 @@ class ApiClient {
       }
     } catch (err) {
       if (timeoutHandle) clearTimeout(timeoutHandle);
-      if (externalAbortHandler && opts.signal) {
-        opts.signal.removeEventListener('abort', externalAbortHandler);
-      }
+      // See note above: CancelToken has no remove-listener, and the
+      // handler is harmless once httpRequest is destroyed.
       httpRequest.destroy();
-      throw err;
+      throw err instanceof Error ? err : new Error('Request failed');
     }
   }
 
   // -------- Auth --------
 
   async requestOtp(email: string): Promise<void> {
-    await this.request('POST', '/api/auth/otp/request', { email });
+    const req: RequestOtpBody = { email };
+    await this.request<void>('POST', '/auth/send-code', req);
   }
 
   async verifyOtp(email: string, code: string): Promise<LoginResponse> {
-    return this.request<LoginResponse>('POST', '/api/auth/otp/verify', { email, code });
+    const req: VerifyOtpBody = { email, code };
+    return this.request<LoginResponse>('POST', '/auth/verify-code', req);
   }
 
   async getMe(opts?: RequestOpts): Promise<User> {
     return this.request<User>('GET', '/api/me', undefined, opts);
   }
 
-  async updateMe(req: { display_name?: string; avatar_url?: string }, opts?: RequestOpts): Promise<User> {
+  async updateMe(req: UpdateMeRequest, opts?: RequestOpts): Promise<User> {
     return this.request<User>('PATCH', '/api/me', req, opts);
   }
 
@@ -248,55 +327,41 @@ class ApiClient {
     // change a type and we don't want a single bad row to take
     // down the inbox tab. Falls back to an empty array; the page
     // renders the empty state instead of a half-populated list.
-    const raw = await this.request<unknown>('GET', '/api/inbox', undefined, opts);
+    const raw = await this.request<Object>('GET', '/api/inbox', undefined, opts);
     return parseWithFallback(raw, InboxListSchema, EMPTY_INBOX_LIST, {
       endpoint: 'GET /api/inbox'
     });
   }
 
   async markInboxRead(id: string): Promise<void> {
-    await this.request('POST', `/api/inbox/${id}/read`);
+    await this.request<void>('POST', `/api/inbox/${id}/read`);
   }
 
   async markAllInboxRead(): Promise<void> {
-    await this.request('POST', '/api/inbox/read-all');
+    await this.request<void>('POST', '/api/inbox/read-all');
   }
 
   async archiveInbox(id: string): Promise<void> {
-    await this.request('POST', `/api/inbox/${id}/archive`);
+    await this.request<void>('POST', `/api/inbox/${id}/archive`);
   }
 
   async archiveAllInbox(): Promise<void> {
-    await this.request('POST', '/api/inbox/archive-all');
+    await this.request<void>('POST', '/api/inbox/archive-all');
   }
 
   async archiveAllReadInbox(): Promise<void> {
-    await this.request('POST', '/api/inbox/archive-read');
+    await this.request<void>('POST', '/api/inbox/archive-read');
   }
 
   async archiveCompletedInbox(): Promise<void> {
-    await this.request('POST', '/api/inbox/archive-completed');
+    await this.request<void>('POST', '/api/inbox/archive-completed');
   }
 
   // -------- Issues --------
 
   async listIssues(params: ListIssuesParams = {}, opts?: RequestOpts): Promise<ListIssuesResponse> {
-    const search = new URLSearchParams();
-    if (params.status) {
-      const arr = Array.isArray(params.status) ? params.status : [params.status];
-      arr.forEach(s => search.append('status', s));
-    }
-    if (params.priority) {
-      const arr = Array.isArray(params.priority) ? params.priority : [params.priority];
-      arr.forEach(p => search.append('priority', p));
-    }
-    if (params.assignee_id) search.set('assignee_id', params.assignee_id);
-    if (params.project_id) search.set('project_id', params.project_id);
-    if (params.search) search.set('search', params.search);
-    if (params.page) search.set('page', String(params.page));
-    if (params.page_size) search.set('page_size', String(params.page_size));
-    const qs = search.toString();
-    const raw = await this.request<unknown>(
+    const qs = buildIssueQueryString(params);
+    const raw = await this.request<Object>(
       'GET',
       `/api/issues${qs ? '?' + qs : ''}`,
       undefined,
@@ -311,7 +376,7 @@ class ApiClient {
     // Drift-safe read: the issue detail page checks
     // `issue.id === ''` to render the "issue not found / shape
     // drifted" error state instead of a half-populated page.
-    const raw = await this.request<unknown>('GET', `/api/issues/${id}`, undefined, opts);
+    const raw = await this.request<Object>('GET', `/api/issues/${id}`, undefined, opts);
     return parseWithFallback(raw, IssueSchema, EMPTY_ISSUE, {
       endpoint: 'GET /api/issues/:id'
     });
@@ -326,17 +391,17 @@ class ApiClient {
   }
 
   async archiveIssue(id: string): Promise<void> {
-    await this.request('DELETE', `/api/issues/${id}/archive`);
+    await this.request<void>('DELETE', `/api/issues/${id}/archive`);
   }
 
   // -------- Timeline / Comments --------
 
-  async getTimeline(issueId: string, opts?: RequestOpts): Promise<{ entries: unknown[] }> {
-    return this.request<{ entries: unknown[] }>('GET', `/api/issues/${issueId}/timeline`, undefined, opts);
+  async getTimeline(issueId: string, opts?: RequestOpts): Promise<TimelineResponse> {
+    return this.request<TimelineResponse>('GET', `/api/issues/${issueId}/timeline`, undefined, opts);
   }
 
   async listComments(issueId: string, opts?: RequestOpts): Promise<Comment[]> {
-    const raw = await this.request<unknown>('GET', `/api/issues/${issueId}/comments`, undefined, opts);
+    const raw = await this.request<Object>('GET', `/api/issues/${issueId}/comments`, undefined, opts);
     return parseWithFallback(raw, CommentListSchema, EMPTY_COMMENT_LIST, {
       endpoint: 'GET /api/issues/:id/comments'
     });
@@ -348,32 +413,57 @@ class ApiClient {
     // the optimistic update the mutation already applied to the
     // cache. Fallback yields `id: ''` so the onSuccess writer
     // detects drift and falls back to invalidate.
-    const raw = await this.request<unknown>(
+    const merged: RequestOpts = {
+      endpoint: 'POST /api/issues/:id/comments'
+    };
+    if (opts) {
+      merged.cancelToken = opts.cancelToken;
+    }
+    const req: CommentBodyRequest = { body };
+    const parseOpts: ParseOptions = {
+      endpoint: 'POST /api/issues/:id/comments'
+    };
+    const raw = await this.request<Object>(
       'POST',
       `/api/issues/${issueId}/comments`,
-      { body },
-      { ...opts, endpoint: 'POST /api/issues/:id/comments' }
+      req,
+      merged
     );
-    return parseWithFallback(raw, CommentSchema, EMPTY_COMMENT, {
-      endpoint: 'POST /api/issues/:id/comments'
-    });
+    return parseWithFallback(raw, CommentSchema, EMPTY_COMMENT, parseOpts);
   }
 
   async updateComment(commentId: string, body: string): Promise<Comment> {
-    const raw = await this.request<unknown>('PATCH', `/api/comments/${commentId}`, { body });
-    return parseWithFallback(raw, CommentSchema, EMPTY_COMMENT, {
+    const req: CommentBodyRequest = { body };
+    const parseOpts: ParseOptions = {
       endpoint: 'PATCH /api/comments/:id'
-    });
+    };
+    const raw = await this.request<Object>('PATCH', `/api/comments/${commentId}`, req);
+    return parseWithFallback(raw, CommentSchema, EMPTY_COMMENT, parseOpts);
   }
 
   async deleteComment(commentId: string): Promise<void> {
-    await this.request('DELETE', `/api/comments/${commentId}`);
+    await this.request<void>('DELETE', `/api/comments/${commentId}`);
+  }
+
+  async reactToComment(commentId: string, emoji: string): Promise<IssueReaction> {
+    // Replaces the raw fetch() that mutations/issue.ets used to call —
+    // the reaction endpoint now goes through the same request() path
+    // (Bearer auth, X-Workspace-Slug, X-Request-ID, timeout) as every
+    // other write. The response shape matches server ReactionResponse
+    // (id / comment_id / actor_type / actor_id / emoji / created_at),
+    // which is exactly IssueReaction in models/types.ets.
+    const req: EmojiRequest = { emoji };
+    return this.request<IssueReaction>(
+      'POST',
+      `/api/comments/${commentId}/reactions`,
+      req
+    );
   }
 
   // -------- Projects --------
 
   async listProjects(opts?: RequestOpts): Promise<ListProjectsResponse> {
-    const raw = await this.request<unknown>('GET', '/api/projects', undefined, opts);
+    const raw = await this.request<Object>('GET', '/api/projects', undefined, opts);
     return parseWithFallback(raw, ListProjectsResponseSchema, EMPTY_LIST_PROJECTS_RESPONSE, {
       endpoint: 'GET /api/projects'
     });
@@ -383,7 +473,7 @@ class ApiClient {
     // Drift-safe parse — UI checks `data.id === ""` to render the
     // "project not found / shape drifted" error state instead of
     // a half-populated detail page.
-    const raw = await this.request<unknown>('GET', `/api/projects/${id}`, undefined, opts);
+    const raw = await this.request<Object>('GET', `/api/projects/${id}`, undefined, opts);
     return parseWithFallback(raw, ProjectSchema, EMPTY_PROJECT, {
       endpoint: 'GET /api/projects/:id'
     });
@@ -430,7 +520,7 @@ class ApiClient {
   }
 
   async listChatMessages(sessionId: string, opts?: RequestOpts): Promise<ChatMessage[]> {
-    const raw = await this.request<unknown>(
+    const raw = await this.request<Object>(
       'GET',
       `/api/chat/sessions/${sessionId}/messages`,
       undefined,
@@ -442,7 +532,8 @@ class ApiClient {
   }
 
   async sendChatMessage(sessionId: string, body: string): Promise<SendChatMessageResponse> {
-    return this.request<SendChatMessageResponse>('POST', `/api/chat/sessions/${sessionId}/messages`, { content: body });
+    const req: SendChatMessageRequest = { content: body };
+    return this.request<SendChatMessageResponse>('POST', `/api/chat/sessions/${sessionId}/messages`, req);
   }
 
   // -------- Agents --------
@@ -452,7 +543,7 @@ class ApiClient {
   }
 
   async listAgentTasks(agentId: string, opts?: RequestOpts): Promise<AgentTask[]> {
-    const raw = await this.request<unknown>(
+    const raw = await this.request<Object>(
       'GET',
       `/api/agents/${agentId}/tasks`,
       undefined,
@@ -488,11 +579,12 @@ class ApiClient {
   }
 
   async addPin(itemId: string, itemType: 'issue' | 'project' | 'doc'): Promise<PinnedItem> {
-    return this.request<PinnedItem>('POST', '/api/pins', { item_id: itemId, item_type: itemType });
+    const req: PinRequest = { item_id: itemId, item_type: itemType };
+    return this.request<PinnedItem>('POST', '/api/pins', req);
   }
 
   async removePin(pinId: string): Promise<void> {
-    await this.request('DELETE', `/api/pins/${pinId}`);
+    await this.request<void>('DELETE', `/api/pins/${pinId}`);
   }
 
   async reorderPins(req: ReorderPinsRequest): Promise<PinnedItem[]> {
@@ -515,7 +607,7 @@ class ApiClient {
     return this.request<Attachment[]>('GET', `/api/attachments?parent_id=${parentId}`, undefined, opts);
   }
 
-  async uploadFile(parentId: string, file: { uri: string; name: string; type: string }): Promise<Attachment> {
+  async uploadFile(parentId: string, file: UploadFileAsset): Promise<Attachment> {
     // The shape mirrors the iOS FileAsset (apps/mobile/data/api.ts). On HarmonyOS
     // uploads use the same FormData+RequestBody pattern via @ohos.net.http.
     // Implementation is intentionally a stub here — the data flow is

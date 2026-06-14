@@ -5,7 +5,7 @@ import { MulticaText } from './Text';
 export struct IconButton {
   @Param glyph: string = '·';
   @Param scheme: ColorScheme = 'light';
-  @Param size: number = 36;
+  @Param iconButtonSize: number = 36;
   @Param accessibilityLabel: string = '';
   @Event onTap: () => void = (): void => {};
 
@@ -14,13 +14,13 @@ export struct IconButton {
       MulticaText({
         value: this.glyph,
         scheme: this.scheme,
-        size: 'lg',
+        textSize: 'lg',
         weight: 'normal',
         color: 'foreground'
       })
     }
-    .width(this.size)
-    .height(this.size)
+    .width(this.iconButtonSize)
+    .height(this.iconButtonSize)
     .borderRadius(RADIUS.full)
     .backgroundColor('transparent')
     .onClick(() => { this.onTap(); })

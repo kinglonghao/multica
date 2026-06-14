@@ -1,10 +1,23 @@
-import { wsClient } from './ws-client';
+import { wsClient, WSEnvelopeHandler } from './ws-client';
 import { queryClient, QueryKey } from '../queries/cache';
 import { workspaceStore } from '../data/workspace';
 import { inboxQueryKey } from '../queries/inbox';
-import { issueListKey, issueDetailKey } from '../queries/issue';
-import { projectDetailKey, projectListKey } from '../queries/project';
-import { InboxItem, Issue, Project, WSEventType } from '../models/types';
+import { issueDetailKey } from '../queries/issue';
+import { projectDetailKey } from '../queries/project';
+import {
+  ChatMessage,
+  ChatMessagePayload,
+  InboxItem,
+  Issue,
+  IssueScopedPayload,
+  IssueUpdatedPayload,
+  PresencePayload,
+  Project,
+  ProjectUpdatedPayload,
+  ReactionPayload,
+  WSEnvelope,
+  WSEventType
+} from '../models/types';
 
 /**
  * Realtime hooks. Mirrors the iOS app's data/realtime hooks
@@ -64,19 +77,21 @@ export function useIssueRealtime(issueId: string | null): Unsub {
   const wsId = workspaceStore.currentId;
 
   if (issueId) {
-    unsubs.push(wsClient.on<{ id: string; issue: Issue }>('issue:updated', (env) => {
-      const incomingId = env.payload.issue?.id ?? env.payload.id;
+    unsubs.push(wsClient.on('issue:updated', ((env: WSEnvelope<IssueUpdatedPayload>) => {
+      const p = env.payload;
+      const incomingId = p.issue?.id ?? p.id;
       if (incomingId !== issueId) return;
       const key = issueDetailKey(wsId, issueId);
-      queryClient.setQueryData<Issue>(key, env.payload.issue);
-    }));
-    unsubs.push(wsClient.on<{ id: string; issue_id: string; }>('issue:deleted', (env) => {
-      if (env.payload.id !== issueId) return;
+      queryClient.setQueryData<Issue>(key, p.issue);
+    }) as WSEnvelopeHandler));
+    unsubs.push(wsClient.on('issue:deleted', ((env: WSEnvelope<IssueScopedPayload>) => {
+      const p = env.payload;
+      if (p.id !== issueId) return;
       // Invalidate the issue-detail cache; the issue list will
       // pick up the deletion via the listing-level subscription
       // (or the next refetch on the page that owns the list).
       queryClient.invalidate(issueDetailKey(wsId, issueId));
-    }));
+    }) as WSEnvelopeHandler));
 
     // v1.0: the per-record subscription also covers comment and
     // reaction events for this issue. The previous v0.7 comment
@@ -85,28 +100,33 @@ export function useIssueRealtime(issueId: string | null): Unsub {
     // reaction events invalidate the same cache because the
     // detail view re-fetches reactions with the comments.
     const commentListKey: QueryKey = ['issue-comments', issueId];
-    unsubs.push(wsClient.on<{ id: string; issue_id: string; }>('comment:created', (env) => {
-      if (env.payload.issue_id !== issueId) return;
+    unsubs.push(wsClient.on('comment:created', ((env: WSEnvelope<IssueScopedPayload>) => {
+      const p = env.payload;
+      if (p.issue_id !== issueId) return;
       queryClient.invalidate(commentListKey);
-    }));
-    unsubs.push(wsClient.on<{ id: string; issue_id: string; }>('comment:updated', (env) => {
-      if (env.payload.issue_id !== issueId) return;
+    }) as WSEnvelopeHandler));
+    unsubs.push(wsClient.on('comment:updated', ((env: WSEnvelope<IssueScopedPayload>) => {
+      const p = env.payload;
+      if (p.issue_id !== issueId) return;
       queryClient.invalidate(commentListKey);
-    }));
-    unsubs.push(wsClient.on<{ id: string; issue_id: string; }>('comment:deleted', (env) => {
-      if (env.payload.issue_id !== issueId) return;
+    }) as WSEnvelopeHandler));
+    unsubs.push(wsClient.on('comment:deleted', ((env: WSEnvelope<IssueScopedPayload>) => {
+      const p = env.payload;
+      if (p.issue_id !== issueId) return;
       queryClient.invalidate(commentListKey);
-    }));
-    unsubs.push(wsClient.on<{ comment_id: string; issue_id: string; }>('reaction:added', (env) => {
-      if (env.payload.issue_id !== issueId) return;
+    }) as WSEnvelopeHandler));
+    unsubs.push(wsClient.on('reaction:added', ((env: WSEnvelope<ReactionPayload>) => {
+      const p = env.payload;
+      if (p.issue_id !== issueId) return;
       queryClient.invalidate(commentListKey);
-    }));
-    unsubs.push(wsClient.on<{ comment_id: string; issue_id: string; }>('reaction:removed', (env) => {
-      if (env.payload.issue_id !== issueId) return;
+    }) as WSEnvelopeHandler));
+    unsubs.push(wsClient.on('reaction:removed', ((env: WSEnvelope<ReactionPayload>) => {
+      const p = env.payload;
+      if (p.issue_id !== issueId) return;
       queryClient.invalidate(commentListKey);
-    }));
+    }) as WSEnvelopeHandler));
   } else {
-    unsubs.push(wsClient.on<{ issue: Issue }>('issue:updated', () => {
+    unsubs.push(wsClient.on('issue:updated', () => {
       queryClient.invalidatePrefix(issueListPrefix(wsId));
     }));
     unsubs.push(wsClient.on('issue:created', () => {
@@ -128,9 +148,16 @@ export function useIssueRealtime(issueId: string | null): Unsub {
 export function useInboxRealtime(): Unsub {
   const wsId = workspaceStore.currentId;
   const unsubs: Unsub[] = [];
-  // Each event name is typed as WSEventType (a string union) so
-  // wsClient.on's generic dispatch picks the right payload shape.
-  const inboxEvents: WSEventType[] = ['inbox:created', 'inbox:updated', 'inbox:deleted'];
+  // Parity fix: these names mirror the iOS inbox realtime hook
+  // (apps/mobile/data/realtime/use-inbox-realtime.ts). The earlier
+  // code invented inbox:created/updated/deleted which are NOT in the
+  // upstream protocol — dispatch() would have silently dropped every
+  // one. These five are the real server events. Handlers ignore the
+  // payload (invalidate-only) so the wide fallback overload is fine.
+  const inboxEvents: WSEventType[] = [
+    'inbox:new', 'inbox:read', 'inbox:archived',
+    'inbox:batch-read', 'inbox:batch-archived'
+  ];
   for (const evt of inboxEvents) {
     unsubs.push(wsClient.on(evt, () => {
       queryClient.invalidate(inboxQueryKey(wsId));
@@ -147,14 +174,15 @@ export function useProjectRealtime(projectId: string | null): Unsub {
   const wsId = workspaceStore.currentId;
   const unsubs: Unsub[] = [];
   if (projectId) {
-    unsubs.push(wsClient.on<{ id: string; project: Project }>('project:updated', (env) => {
-      if (env.payload.id !== projectId) return;
+    unsubs.push(wsClient.on('project:updated', ((env: WSEnvelope<ProjectUpdatedPayload>) => {
+      const p = env.payload;
+      if (p.id !== projectId) return;
       // v1.0 fix: the cache entry needs the Project object
       // (env.payload.project), not the whole envelope
       // (env.payload) — the latter has shape `{ id, project }`,
       // which would corrupt the ProjectDetailPage's read.
-      queryClient.setQueryData<Project>(projectDetailKey(wsId, projectId), env.payload.project);
-    }));
+      queryClient.setQueryData<Project>(projectDetailKey(wsId, projectId), p.project);
+    }) as WSEnvelopeHandler));
   } else {
     unsubs.push(wsClient.on('project:updated', () => {
       queryClient.invalidatePrefix(projectListPrefix(wsId));
@@ -169,14 +197,15 @@ export function useProjectRealtime(projectId: string | null): Unsub {
 export function useChatRealtime(sessionId: string | null): Unsub {
   if (!sessionId) return () => { /* noop */ };
   const key: QueryKey = ['chat-messages', sessionId];
-  return wsClient.on<{ session_id: string; message: unknown }>('chat:message', (env) => {
-    if (env.payload.session_id !== sessionId) return;
-    queryClient.setQueryData<unknown[]>(key, (prev: unknown[] | undefined) => {
+  return wsClient.on('chat:message', ((env: WSEnvelope<ChatMessagePayload>) => {
+    const p = env.payload;
+    if (p.session_id !== sessionId) return;
+    queryClient.setQueryData<ChatMessage[]>(key, (prev: ChatMessage[] | undefined) => {
       const list = prev ? [...prev] : [];
-      list.push(env.payload.message);
+      list.push(p.message);
       return list;
     });
-  });
+  }) as WSEnvelopeHandler);
 }
 
 /**
@@ -185,8 +214,9 @@ export function useChatRealtime(sessionId: string | null): Unsub {
  * list / chat headers can render the live state.
  */
 export function usePresenceRealtime(): Unsub {
-  return wsClient.on<{ agent_id: string; status: string }>('presence:update', (env) => {
-    const key: QueryKey = ['agent-presence', env.payload.agent_id];
-    queryClient.setQueryData<{ status: string }>(key, { status: env.payload.status });
-  });
+  return wsClient.on('agent:status', ((env: WSEnvelope<PresencePayload>) => {
+    const p = env.payload;
+    const key: QueryKey = ['agent-presence', p.agent_id];
+    queryClient.setQueryData<PresencePayload>(key, { agent_id: p.agent_id, status: p.status });
+  }) as WSEnvelopeHandler);
 }

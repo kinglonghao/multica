@@ -7,21 +7,21 @@ import { MulticaText } from './Text';
 export struct PriorityIcon {
   @Param priority: IssuePriority | string = 'no_priority';
   @Param scheme: ColorScheme = 'light';
-  @Param size: number = 16;
+  @Param iconSize: number = 16;
 
   build() {
     Stack({ alignContent: Alignment.Center }) {
       MulticaText({
         value: this.glyph(this.priority),
         scheme: this.scheme,
-        size: 'xs',
+        textSize: 'xs',
         weight: 'bold',
         color: 'brandForeground'
       })
     }
-    .width(this.size)
-    .height(this.size)
-    .borderRadius(this.size / 2)
+    .width(this.iconSize)
+    .height(this.iconSize)
+    .borderRadius(this.iconSize / 2)
     .backgroundColor(priorityColor(this.priority, this.scheme))
   }
 

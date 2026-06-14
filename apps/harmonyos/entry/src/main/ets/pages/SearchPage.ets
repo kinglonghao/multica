@@ -1,7 +1,7 @@
-import { appNavigation } from '../data/navigation';
+import { appNavigation, navParam } from '../data/navigation';
 import { api } from '../data/api';
 import { Issue, Project } from '../models/types';
-import { THEME, ColorScheme, SPACE, RADIUS } from '../lib/theme';
+import { THEME, ColorScheme, SPACE, RADIUS, space, themeTokens } from '../lib/theme';
 import { MulticaText } from '../components/ui/Text';
 import { Header } from '../components/ui/Header';
 import { IconButton } from '../components/ui/IconButton';
@@ -10,6 +10,14 @@ import { ProjectRow } from '../components/project/ProjectRow';
 
 const DEBOUNCE_MS = 250;
 const SEARCH_TABS: ReadonlyArray<'issues' | 'projects' | 'pins'> = ['issues', 'projects', 'pins'];
+
+/** Local view-model for a pin row in the search pins tab. Named
+ *  interface because ArkTS forbids inline object-literal types. */
+interface PinRow {
+  id: string;
+  label: string;
+  sub: string;
+}
 
 @ComponentV2
 export struct SearchPage {
@@ -20,7 +28,7 @@ export struct SearchPage {
   @Local debouncedQuery: string = '';
   @Local issueResults: Issue[] = [];
   @Local projectResults: Project[] = [];
-  @Local pins: { id: string; label: string; sub: string }[] = [];
+  @Local pins: PinRow[] = [];
   private debounceHandle: number | null = null;
 
   aboutToAppear(): void {
@@ -75,15 +83,19 @@ export struct SearchPage {
   private async loadPins(): Promise<void> {
     try {
       const pins = await api.listPins();
-      this.pins = pins.map(p => ({
-        id: p.id,
-        label: p.type === 'issue' ? `Issue ${p.item_id}` :
-               p.type === 'project' ? `Project ${p.item_id}` : `Doc ${p.item_id}`,
-        sub: `Pinned ${new Date(p.created_at).toLocaleDateString()}`
-      }));
+      this.pins = pins.map((p): PinRow => this.toPinRow(p.id, p.type, p.item_id, p.created_at));
     } catch (err) {
       console.warn('[search] pins failed', err);
     }
+  }
+
+  private toPinRow(id: string, type: 'issue' | 'project' | 'doc', itemId: string, createdAt: string): PinRow {
+    return {
+      id,
+      label: type === 'issue' ? `Issue ${itemId}` :
+             type === 'project' ? `Project ${itemId}` : `Doc ${itemId}`,
+      sub: `Pinned ${new Date(createdAt).toLocaleDateString()}`
+    };
   }
 
   build() {
@@ -100,20 +112,20 @@ export struct SearchPage {
         this.Tab('pins', 'Pinned')
       }
       .width('100%')
-      .padding(SPACE['2'])
+      .padding(space('2'))
       .border({
         width: { bottom: 1 },
-        color: String(THEME[this.scheme].border)
+        color: String(themeTokens(this.scheme).border)
       })
 
       TextInput({ placeholder: 'Search…', text: this.query })
-        .placeholderColor(String(THEME[this.scheme].mutedForeground))
-        .fontColor(String(THEME[this.scheme].foreground))
-        .backgroundColor(String(THEME[this.scheme].card))
+        .placeholderColor(String(themeTokens(this.scheme).mutedForeground))
+        .fontColor(String(themeTokens(this.scheme).foreground))
+        .backgroundColor(String(themeTokens(this.scheme).card))
         .borderRadius(RADIUS.md)
-        .padding(SPACE['3'])
+        .padding(space('3'))
         .width('100%')
-        .margin({ top: SPACE['3'], left: SPACE['4'], right: SPACE['4'] })
+        .margin({ top: space('3'), left: space('4'), right: space('4') })
         .onChange((value: string) => { this.onQuery(value); })
 
       if (this.tab === 'issues') {
@@ -122,18 +134,18 @@ export struct SearchPage {
             IssueRow({
               issue: issue,
               scheme: this.scheme,
-              onPress: () => { appNavigation.pushName('IssueDetailPage', { id: issue.id }); }
+              onPress: () => { appNavigation.pushName('IssueDetailPage', navParam('id', issue.id)); }
             })
           })
           if (this.issueResults.length === 0 && this.debouncedQuery.length > 0) {
             MulticaText({
               value: 'No issues match your search',
               scheme: this.scheme,
-              size: 'sm',
+              textSize: 'sm',
               color: 'mutedForeground',
-              textAlign: TextAlign.Center
+              textAlign: 'center'
             })
-              .padding(SPACE['6'])
+              .padding(space('6'))
           }
         }
         .layoutWeight(1)
@@ -144,56 +156,56 @@ export struct SearchPage {
             ProjectRow({
               project: project,
               scheme: this.scheme,
-              onPress: () => { appNavigation.pushName('ProjectDetailPage', { id: project.id }); }
+              onPress: () => { appNavigation.pushName('ProjectDetailPage', navParam('id', project.id)); }
             })
           })
           if (this.projectResults.length === 0 && this.debouncedQuery.length > 0) {
             MulticaText({
               value: 'No projects match your search',
               scheme: this.scheme,
-              size: 'sm',
+              textSize: 'sm',
               color: 'mutedForeground',
-              textAlign: TextAlign.Center
+              textAlign: 'center'
             })
-              .padding(SPACE['6'])
+              .padding(space('6'))
           }
         }
         .layoutWeight(1)
         .width('100%')
       } else {
         Column() {
-          ForEach(this.pins, (pin) => {
+          ForEach(this.pins, (pin: PinRow) => {
             Row() {
               MulticaText({
                 value: pin.label,
                 scheme: this.scheme,
-                size: 'base',
+                textSize: 'base',
                 color: 'foreground'
               })
               Blank()
               MulticaText({
                 value: pin.sub,
                 scheme: this.scheme,
-                size: 'xs',
+                textSize: 'xs',
                 color: 'mutedForeground'
               })
             }
             .width('100%')
-            .padding(SPACE['4'])
+            .padding(space('4'))
             .border({
               width: { bottom: 1 },
-              color: String(THEME[this.scheme].border)
+              color: String(themeTokens(this.scheme).border)
             })
           })
           if (this.pins.length === 0) {
             MulticaText({
               value: 'No pinned items yet',
               scheme: this.scheme,
-              size: 'sm',
+              textSize: 'sm',
               color: 'mutedForeground',
-              textAlign: TextAlign.Center
+              textAlign: 'center'
             })
-              .padding(SPACE['6'])
+              .padding(space('6'))
           }
         }
         .layoutWeight(1)
@@ -202,7 +214,7 @@ export struct SearchPage {
     }
     .width('100%')
     .height('100%')
-    .backgroundColor(String(THEME[this.scheme].background))
+    .backgroundColor(String(themeTokens(this.scheme).background))
   }
 
   @Builder Tab(name: 'issues' | 'projects' | 'pins', label: string) {
@@ -210,17 +222,17 @@ export struct SearchPage {
       MulticaText({
         value: label,
         scheme: this.scheme,
-        size: 'sm',
+        textSize: 'sm',
         weight: this.tab === name ? 'medium' : 'normal',
         color: this.tab === name ? 'foreground' : 'mutedForeground'
       })
     }
     .layoutWeight(1)
-    .padding({ top: SPACE['2'], bottom: SPACE['2'] })
-    .backgroundColor(this.tab === name ? String(THEME[this.scheme].card) : 'transparent')
+    .padding({ top: space('2'), bottom: space('2') })
+    .backgroundColor(this.tab === name ? String(themeTokens(this.scheme).card) : 'transparent')
     .borderRadius(RADIUS.md)
     .justifyContent(FlexAlign.Center)
-    .alignItems(HorizontalAlign.Center)
+    .alignItems(VerticalAlign.Center)
     .onClick(() => { this.tab = name; })
   }
 

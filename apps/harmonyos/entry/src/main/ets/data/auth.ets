@@ -26,6 +26,15 @@ interface AuthSnapshot {
   error: string | null;
 }
 
+/** Patch for AuthStore.set — each field optional. Named interface
+ *  because ArkTS forbids Partial<> and inline-literal types. */
+interface AuthPatch {
+  state?: BootState;
+  user?: User | null;
+  token?: string | null;
+  error?: string | null;
+}
+
 type Listener = (s: AuthSnapshot) => void;
 
 class AuthStore {
@@ -47,8 +56,14 @@ class AuthStore {
     return () => this.listeners.delete(listener);
   }
 
-  private set(patch: Partial<AuthSnapshot>): void {
-    this.snapshot = { ...this.snapshot, ...patch };
+  private set(patch: AuthPatch): void {
+    const prev = this.snapshot;
+    this.snapshot = {
+      state: patch.state !== undefined ? patch.state : prev.state,
+      user: patch.user !== undefined ? patch.user : prev.user,
+      token: patch.token !== undefined ? patch.token : prev.token,
+      error: patch.error !== undefined ? patch.error : prev.error
+    };
     for (const l of this.listeners) l(this.snapshot);
   }
 
@@ -81,7 +96,7 @@ class AuthStore {
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Failed to send code';
       this.set({ error: msg });
-      throw err;
+      throw new Error(msg);
     }
   }
 
@@ -100,7 +115,7 @@ class AuthStore {
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Verification failed';
       this.set({ error: msg });
-      throw err;
+      throw new Error(msg);
     }
   }
 

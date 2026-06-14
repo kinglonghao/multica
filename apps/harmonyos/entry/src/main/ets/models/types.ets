@@ -130,7 +130,7 @@ export interface InboxItem {
   actor_id?: string | null;
   actor_name?: string | null;
   actor_avatar_url?: string | null;
-  details?: Record<string, unknown> | null;
+  details?: Record<string, Object> | null;
   created_at: string;
   updated_at: string;
 }
@@ -241,7 +241,7 @@ export interface TimelineEntry {
   actor_id?: string | null;
   actor_name?: string | null;
   actor_avatar_url?: string | null;
-  details?: Record<string, unknown> | null;
+  details?: Record<string, Object> | null;
 }
 
 export interface IssueReaction {
@@ -497,8 +497,101 @@ export type WSEventType =
   | 'pull_request:unlinked'
   | string;
 
-export interface WSEnvelope<T = unknown> {
+export interface WSEnvelope<T = Object | string | number | boolean | null> {
   event: WSEventType;
   payload: T;
   ts: string;
+}
+
+// ---------- WS event payloads ----------
+//
+// Named payload interfaces for the events the realtime hooks
+// subscribe to. ArkTS forbids inline object-literal types
+// (`on<{ id: string; issue: Issue }>`), so each shape that a
+// hook reads off `env.payload` gets a named interface here. The
+// wsClient.on() overloads consume these named payloads directly,
+// so realtime-hooks.ets can read `env.payload` without local
+// casts while the runtime storage still stays wide.
+//
+// Keep these in lockstep with the iOS payload shapes in
+// apps/mobile/data/realtime/*-ws-updaters.ts.
+
+/** issue:updated — full Issue is echoed so detail pages can patch
+ *  their cache without a refetch. */
+export interface IssueUpdatedPayload {
+  id: string;
+  issue: Issue;
+}
+
+/** issue:deleted / comment:* — identifies which issue a record
+ *  belongs to so the hook can scope its invalidation. */
+export interface IssueScopedPayload {
+  id: string;
+  issue_id: string;
+}
+
+/** reaction:added / reaction:removed — the comment the reaction
+ *  landed on, scoped to its issue. */
+export interface ReactionPayload {
+  comment_id: string;
+  issue_id: string;
+}
+
+/** project:updated — full Project is echoed (same reason as
+ *  IssueUpdatedPayload). */
+export interface ProjectUpdatedPayload {
+  id: string;
+  project: Project;
+}
+
+/** chat:message — a new message in a session. */
+export interface ChatMessagePayload {
+  session_id: string;
+  message: ChatMessage;
+}
+
+/** presence / agent:status — an agent's live status. ArkTS can't
+ *  read this off the indexed-access map (arkts-no-aliases-by-index),
+ *  so this interface is also the concrete type the agent:status
+ *  overload hands to the handler. */
+export interface PresencePayload {
+  agent_id: string;
+  status: string;
+}
+
+/**
+ * WSEventPayloadMap — the single source of truth for "which event
+ * carries which payload shape". Mirrors the iOS app's
+ * `@multica/core/types::WSEventPayloadMap`.
+ *
+ * IMPORTANT — why this map exists as a DOCUMENT even though ArkTS
+ * forbids indexing it (`arkts-no-aliases-by-index` means we cannot
+ * write `WSEventPayloadMap[K]`):
+ *
+ * The TypeScript-native way to dispatch typed payloads is a generic
+ * `on<K extends keyof Map>(e: K, h: (p: Map[K]) => void)`. ArkTS
+ * rejects the `Map[K]` indexed-access type, so that pattern is
+ * unavailable here. Instead `wsClient.on` declares one explicit
+ * overload per event (see realtime/ws-client.ets). This interface is
+ * the canonical list those overloads are generated from — when you
+ * add a payload here, also add the matching overload, and vice versa.
+ * The drift is caught only by humans; keep the two in lockstep.
+ *
+ * Events NOT listed here either have no local consumer (daemon:*,
+ * heartbeat) or are consumed with an ignore-everything handler
+ * (`invalidate`, no payload read) — for those, the wide
+ * `on(event: WSEventType, handler)` fallback is used and payload
+ * stays `object`.
+ */
+export interface WSEventPayloadMap {
+  'issue:updated': IssueUpdatedPayload;
+  'issue:deleted': IssueScopedPayload;
+  'comment:created': IssueScopedPayload;
+  'comment:updated': IssueScopedPayload;
+  'comment:deleted': IssueScopedPayload;
+  'reaction:added': ReactionPayload;
+  'reaction:removed': ReactionPayload;
+  'project:updated': ProjectUpdatedPayload;
+  'chat:message': ChatMessagePayload;
+  'agent:status': PresencePayload;
 }

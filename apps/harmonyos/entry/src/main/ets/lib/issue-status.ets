@@ -1,5 +1,5 @@
 import { IssueStatus, IssuePriority } from '../models/types';
-import { THEME, ColorScheme } from './theme';
+import { ColorScheme, themeTokens } from './theme';
 
 /**
  * Issue status / priority display + color mapping. Mirrors
@@ -12,35 +12,33 @@ import { THEME, ColorScheme } from './theme';
  * orange" is exactly the sort of inconsistency this file prevents.
  */
 
-const STATUS_LABELS: Record<string, string> = {
-  backlog: 'Backlog',
-  todo: 'Todo',
-  in_progress: 'In Progress',
-  in_review: 'In Review',
-  done: 'Done',
-  cancelled: 'Cancelled'
-};
-
-const PRIORITY_LABELS: Record<string, string> = {
-  no_priority: 'No priority',
-  urgent: 'Urgent',
-  high: 'High',
-  medium: 'Medium',
-  low: 'Low'
-};
-
 export function statusLabel(status: IssueStatus | string | null | undefined): string {
   if (!status) return 'Unknown';
-  return STATUS_LABELS[status] ?? status;
+  switch (status) {
+    case 'backlog': return 'Backlog';
+    case 'todo': return 'Todo';
+    case 'in_progress': return 'In Progress';
+    case 'in_review': return 'In Review';
+    case 'done': return 'Done';
+    case 'cancelled': return 'Cancelled';
+    default: return status;
+  }
 }
 
 export function priorityLabel(priority: IssuePriority | string | null | undefined): string {
   if (!priority) return 'No priority';
-  return PRIORITY_LABELS[priority] ?? priority;
+  switch (priority) {
+    case 'no_priority': return 'No priority';
+    case 'urgent': return 'Urgent';
+    case 'high': return 'High';
+    case 'medium': return 'Medium';
+    case 'low': return 'Low';
+    default: return priority;
+  }
 }
 
 export function statusColor(status: IssueStatus | string | null | undefined, scheme: ColorScheme): string {
-  const t = THEME[scheme];
+  const t = themeTokens(scheme);
   switch (status) {
     case 'backlog': return String(t.statusBacklog);
     case 'todo': return String(t.statusTodo);
@@ -53,7 +51,7 @@ export function statusColor(status: IssueStatus | string | null | undefined, sch
 }
 
 export function priorityColor(priority: IssuePriority | string | null | undefined, scheme: ColorScheme): string {
-  const t = THEME[scheme];
+  const t = themeTokens(scheme);
   switch (priority) {
     case 'urgent': return String(t.priorityUrgent);
     case 'high': return String(t.priorityHigh);

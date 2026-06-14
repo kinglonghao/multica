@@ -1,4 +1,4 @@
-import { QueryHandle, useQuery, QueryOptions, QueryKey } from './cache';
+import { QueryHandle, useQuery, QueryOptions, QueryKey, FetchContext } from './cache';
 import { api } from '../data/api';
 import { workspaceStore } from '../data/workspace';
 import { Project, ListProjectsResponse } from '../models/types';
@@ -14,7 +14,7 @@ export function useProjectListQuery(onUpdate?: () => void): QueryHandle<ListProj
   if (onUpdate) opts.onUpdate = onUpdate;
   return useQuery<ListProjectsResponse>(
     projectListKey(wsId),
-    ({ signal }) => api.listProjects({ signal }),
+    (ctx: FetchContext) => api.listProjects({ cancelToken: ctx.cancelToken }),
     opts
   );
 }
@@ -33,7 +33,7 @@ export function useProjectDetailQuery(
   if (onUpdate) opts.onUpdate = onUpdate;
   return useQuery<Project>(
     projectDetailKey(wsId, id),
-    ({ signal }) => api.getProject(id, { signal }),
+    (ctx: FetchContext) => api.getProject(id, { cancelToken: ctx.cancelToken }),
     opts
   );
 }

@@ -1,9 +1,9 @@
 import { appNavigation } from '../data/navigation';
 import { api } from '../data/api';
-import { useQuery, QueryHandle } from '../queries/cache';
+import { useQuery, QueryHandle, FetchContext } from '../queries/cache';
 import { useChatRealtime } from '../realtime/realtime-hooks';
 import { ChatMessage, ChatSession } from '../models/types';
-import { THEME, ColorScheme, SPACE, RADIUS } from '../lib/theme';
+import { THEME, ColorScheme, SPACE, RADIUS, space, themeTokens } from '../lib/theme';
 import { timeAgo } from '../lib/utils';
 import { MulticaText } from '../components/ui/Text';
 import { Header } from '../components/ui/Header';
@@ -13,7 +13,7 @@ import { Skeleton } from '../components/ui/Skeleton';
 
 @ComponentV2
 export struct ChatDetailPage {
-  @Local id: string = '';
+  @Param chatId: string = '';
   @Local scheme: ColorScheme = 'light';
   @Local version: number = 0;
   @Local inputDraft: string = '';
@@ -25,21 +25,20 @@ export struct ChatDetailPage {
 
   aboutToAppear(): void {
     this.scheme = this.detectScheme();
-    this.id = appNavigation.readString('ChatDetailPage', 'id', '');
     this.session = useQuery<ChatSession>(
-      ['chat-session', this.id],
-      ({ signal }) => api.getChatSession(this.id, { signal }),
+      ['chat-session', this.chatId],
+      (ctx: FetchContext) => api.getChatSession(this.chatId, { cancelToken: ctx.cancelToken }),
       { staleTimeMs: 30_000, onUpdate: () => { this.version++; } }
     );
     this.messages = useQuery<ChatMessage[]>(
-      ['chat-messages', this.id],
-      ({ signal }) => api.listChatMessages(this.id, { signal }),
+      ['chat-messages', this.chatId],
+      (ctx: FetchContext) => api.listChatMessages(this.chatId, { cancelToken: ctx.cancelToken }),
       { staleTimeMs: 10_000, onUpdate: () => { this.version++; } }
     );
     // Subscribe to chat:message events for this session. The
     // hook patches the cache in place — incoming assistant
     // messages stream in without a refetch.
-    this.wsUnsub = useChatRealtime(this.id);
+    this.wsUnsub = useChatRealtime(this.chatId);
   }
 
   aboutToDisappear(): void {
@@ -58,7 +57,7 @@ export struct ChatDetailPage {
     this.sending = true;
     this.sendError = '';
     try {
-      await api.sendChatMessage(this.id, text);
+      await api.sendChatMessage(this.chatId, text);
       this.inputDraft = '';
       // Refetch on send so the user's message + the agent's
       // eventual response both land; the WS hook handles the
@@ -71,6 +70,14 @@ export struct ChatDetailPage {
     }
   }
 
+  private messagesState() {
+    return this.messages ? this.messages.getState() : null;
+  }
+
+  private sessionState() {
+    return this.session ? this.session.getState() : null;
+  }
+
   build() {
     Column() {
       Header({
@@ -79,77 +86,75 @@ export struct ChatDetailPage {
         left: this.BackButton()
       })
 
-      if (!this.messages) {
-        return;
-      }
-      const mState = this.messages.getState();
-      const sState = this.session?.getState();
-      const session = sState?.data;
-      Scroll() {
-        Column() {
-          if (mState.isLoading) {
-            ForEach([1, 2, 3], () => {
-              Skeleton({ scheme: this.scheme, width: '90%', height: 40, radius: 8 })
-                .margin({ top: SPACE['2'], left: SPACE['4'], right: SPACE['4'] })
-            })
-          } else if (mState.data) {
-            ForEach(mState.data, (msg: ChatMessage) => {
-              this.MessageRow(msg, session)
-            })
+      if (!this.messagesState()) {
+        Blank().layoutWeight(1)
+      } else {
+        Scroll() {
+          Column() {
+            if (this.messagesState()!.isLoading) {
+              ForEach([1, 2, 3], () => {
+                Skeleton({ scheme: this.scheme, skeletonWidth: '90%', skeletonHeight: 40, radius: 8 })
+                  .margin({ top: space('2'), left: space('4'), right: space('4') })
+              })
+            } else if (this.messagesState()!.data) {
+              ForEach(this.messagesState()!.data!, (msg: ChatMessage) => {
+                this.MessageRow(msg, this.sessionState()?.data)
+              })
+            }
           }
+          .width('100%')
+          .padding({ top: space('2'), bottom: space('2') })
         }
+        .layoutWeight(1)
         .width('100%')
-        .padding({ top: SPACE['2'], bottom: SPACE['2'] })
       }
-      .layoutWeight(1)
-      .width('100%')
 
       if (this.sendError) {
         MulticaText({
           value: this.sendError,
           scheme: this.scheme,
-          size: 'xs',
+          textSize: 'xs',
           color: 'destructive'
         })
           .width('100%')
-          .padding({ left: SPACE['4'], right: SPACE['4'], top: SPACE['1'] })
+          .padding({ left: space('4'), right: space('4'), top: space('1') })
       }
 
       Row() {
         TextInput({ placeholder: 'Message…', text: this.inputDraft })
-          .placeholderColor(String(THEME[this.scheme].mutedForeground))
-          .fontColor(String(THEME[this.scheme].foreground))
-          .backgroundColor(String(THEME[this.scheme].card))
+          .placeholderColor(String(themeTokens(this.scheme).mutedForeground))
+          .fontColor(String(themeTokens(this.scheme).foreground))
+          .backgroundColor(String(themeTokens(this.scheme).card))
           .borderRadius(RADIUS.full)
-          .padding(SPACE['3'])
+          .padding(space('3'))
           .layoutWeight(1)
           .onChange((value: string) => { this.inputDraft = value; })
         MulticaText({
           value: this.sending ? '…' : '↑',
           scheme: this.scheme,
-          size: 'xl',
+          textSize: 'xl',
           weight: 'bold',
           color: 'brand'
         })
-          .margin({ left: SPACE['3'] })
+          .margin({ left: space('3') })
           .onClick(() => { void this.send(); })
       }
       .width('100%')
-      .padding(SPACE['3'])
+      .padding(space('3'))
       .border({
         width: { top: 1 },
-        color: String(THEME[this.scheme].border)
+        color: String(themeTokens(this.scheme).border)
       })
     }
     .width('100%')
     .height('100%')
-    .backgroundColor(String(THEME[this.scheme].background))
+    .backgroundColor(String(themeTokens(this.scheme).background))
   }
 
   @Builder MessageRow(msg: ChatMessage, session: ChatSession | undefined) {
     Row() {
       if (msg.role === 'assistant') {
-        Avatar({ name: session?.agent_name ?? '·', url: session?.agent_avatar_url ?? '', size: 28, scheme: this.scheme })
+        Avatar({ name: session?.agent_name ?? '·', url: session?.agent_avatar_url ?? '', avatarSize: 28, scheme: this.scheme })
       } else {
         Blank().width(28)
       }
@@ -157,23 +162,23 @@ export struct ChatDetailPage {
         MulticaText({
           value: msg.content,
           scheme: this.scheme,
-          size: 'sm',
+          textSize: 'sm',
           color: 'foreground'
         })
         MulticaText({
           value: timeAgo(msg.created_at),
           scheme: this.scheme,
-          size: 'xs',
+          textSize: 'xs',
           color: 'mutedForeground'
         })
-          .margin({ top: SPACE['0.5'] })
+          .margin({ top: space('0.5') })
       }
       .layoutWeight(1)
-      .margin({ left: SPACE['2'] })
+      .margin({ left: space('2') })
       .alignItems(HorizontalAlign.Start)
     }
     .width('100%')
-    .padding({ left: SPACE['4'], right: SPACE['4'], top: SPACE['1'], bottom: SPACE['1'] })
+    .padding({ left: space('4'), right: space('4'), top: space('1'), bottom: space('1') })
   }
 
   @Builder BackButton() {

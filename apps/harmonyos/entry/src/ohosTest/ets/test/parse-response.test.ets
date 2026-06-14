@@ -15,6 +15,7 @@ import {
   parseWithFallback,
   Schema,
   ParseResult,
+  JsonValue,
   fail,
   isObject,
   ok
@@ -186,9 +187,12 @@ export default function parseResponseTest(): void {
     // the Schema<T> contract works end-to-end: a failing schema
     // triggers the fallback path, a passing one returns the value.
     const goodSchema: Schema<{ kind: string }> = {
-      validate(value: unknown): ParseResult<{ kind: string }> {
-        if (isObject(value) && value['kind'] === 'good') {
-          return ok({ kind: 'good' });
+      validate(value: JsonValue): ParseResult<{ kind: string }> {
+        if (isObject(value)) {
+          const obj = value as Record<string, Object>;
+          if (obj['kind'] === 'good') {
+            return ok({ kind: 'good' });
+          }
         }
         return fail('expected kind=good', [`got ${JSON.stringify(value)}`]);
       }

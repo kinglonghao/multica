@@ -1,8 +1,8 @@
 import { workspaceStore } from '../data/workspace';
 import { api } from '../data/api';
-import { useQuery, QueryHandle } from '../queries/cache';
+import { useQuery, QueryHandle, FetchContext } from '../queries/cache';
 import { Agent } from '../models/types';
-import { THEME, ColorScheme, SPACE, RADIUS } from '../lib/theme';
+import { THEME, ColorScheme, SPACE, RADIUS, space, themeTokens } from '../lib/theme';
 import { MulticaText } from '../components/ui/Text';
 import { Header } from '../components/ui/Header';
 import { Avatar } from '../components/ui/Avatar';
@@ -19,7 +19,7 @@ export struct AgentsPage {
     const wsId = workspaceStore.currentId;
     this.query = useQuery<Agent[]>(
       ['agents', wsId],
-      ({ signal }) => api.listAgents({ signal }),
+      (ctx: FetchContext) => api.listAgents({ cancelToken: ctx.cancelToken }),
       { staleTimeMs: 60_000, onUpdate: () => { this.version++; } }
     );
   }
@@ -32,50 +32,52 @@ export struct AgentsPage {
     return 'light';
   }
 
+  private queryState() {
+    return this.query ? this.query.getState() : null;
+  }
+
   build() {
     Column() {
       Header({ title: 'Agents', scheme: this.scheme })
 
-      if (!this.query) {
-        return;
-      }
-      const state = this.query.getState();
-      if (state.isLoading) {
+      if (!this.queryState()) {
+        Blank().layoutWeight(1)
+      } else if (this.queryState()!.isLoading) {
         Column() {
           ForEach([1, 2, 3], () => {
             Row() {
-              Skeleton({ scheme: this.scheme, width: 40, height: 40, radius: 20 })
+              Skeleton({ scheme: this.scheme, skeletonWidth: 40, skeletonHeight: 40, radius: 20 })
               Column() {
-                Skeleton({ scheme: this.scheme, width: '50%', height: 14, radius: 4 })
-                Skeleton({ scheme: this.scheme, width: '80%', height: 12, radius: 4 })
-                  .margin({ top: SPACE['1.5'] })
+                Skeleton({ scheme: this.scheme, skeletonWidth: '50%', skeletonHeight: 14, radius: 4 })
+                Skeleton({ scheme: this.scheme, skeletonWidth: '80%', skeletonHeight: 12, radius: 4 })
+                  .margin({ top: space('1.5') })
               }
               .layoutWeight(1)
-              .margin({ left: SPACE['3'] })
+              .margin({ left: space('3') })
               .alignItems(HorizontalAlign.Start)
             }
-            .padding(SPACE['4'])
+            .padding(space('4'))
           })
         }
-      } else if (state.error) {
+      } else if (this.queryState()!.error) {
         MulticaText({
-          value: `Failed to load agents: ${state.error!.message}`,
+          value: `Failed to load agents: ${this.queryState()!.error!.message}`,
           scheme: this.scheme,
-          size: 'sm',
+          textSize: 'sm',
           color: 'destructive'
         })
-          .padding(SPACE['4'])
+          .padding(space('4'))
       } else {
         List({ space: 0 }) {
-          ForEach(state.data ?? [], (agent: Agent) => {
+          ForEach(this.queryState()!.data ?? [], (agent: Agent) => {
             ListItem() {
               Row() {
-                Avatar({ name: agent.name, url: agent.avatar_url ?? '', size: 40, scheme: this.scheme })
+                Avatar({ name: agent.name, url: agent.avatar_url ?? '', avatarSize: 40, scheme: this.scheme })
                 Column() {
                   MulticaText({
                     value: agent.name,
                     scheme: this.scheme,
-                    size: 'base',
+                    textSize: 'base',
                     weight: 'medium',
                     color: 'foreground'
                   })
@@ -83,29 +85,32 @@ export struct AgentsPage {
                     MulticaText({
                       value: agent.description,
                       scheme: this.scheme,
-                      size: 'xs',
+                      textSize: 'xs',
                       color: 'mutedForeground',
                       maxLines: 1,
                       overflow: 'ellipsis'
                     })
-                      .margin({ top: SPACE['0.5'] })
+                      .margin({ top: space('0.5') })
                   }
                 }
                 .layoutWeight(1)
-                .margin({ left: SPACE['3'] })
+                .margin({ left: space('3') })
                 .alignItems(HorizontalAlign.Start)
 
                 MulticaText({
                   value: agent.status,
                   scheme: this.scheme,
-                  size: 'xs',
+                  textSize: 'xs',
                   color: 'mutedForeground'
                 })
               }
               .width('100%')
-              .padding(SPACE['4'])
+              .padding(space('4'))
+              .border({
+                width: { bottom: 1 },
+                color: String(themeTokens(this.scheme).border)
+              })
             }
-            .divider({ strokeWidth: 1, color: String(THEME[this.scheme].border) })
           })
         }
         .layoutWeight(1)
@@ -114,6 +119,6 @@ export struct AgentsPage {
     }
     .width('100%')
     .height('100%')
-    .backgroundColor(String(THEME[this.scheme].background))
+    .backgroundColor(String(themeTokens(this.scheme).background))
   }
 }

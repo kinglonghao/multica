@@ -1,4 +1,4 @@
-import { THEME, ColorScheme, SPACE } from '../../lib/theme';
+import { THEME, ColorScheme, SPACE, space, themeTokens } from '../../lib/theme';
 import { MulticaText } from './Text';
 
 @ComponentV2
@@ -12,12 +12,12 @@ export struct Header {
     Row() {
       if (this.left) {
         Row() { this.left?.() }
-          .margin({ right: SPACE['2'] })
+          .margin({ right: space('2') })
       }
       MulticaText({
         value: this.title,
         scheme: this.scheme,
-        size: 'lg',
+        textSize: 'lg',
         weight: 'semibold',
         color: 'foreground'
       })
@@ -28,15 +28,15 @@ export struct Header {
     }
     .width('100%')
     .padding({
-      left: SPACE['4'],
-      right: SPACE['4'],
-      top: SPACE['3'],
-      bottom: SPACE['3']
+      left: space('4'),
+      right: space('4'),
+      top: space('3'),
+      bottom: space('3')
     })
-    .backgroundColor(String(THEME[this.scheme].background))
+    .backgroundColor(String(themeTokens(this.scheme).background))
     .border({
       width: { bottom: 1 },
-      color: String(THEME[this.scheme].border)
+      color: String(themeTokens(this.scheme).border)
     })
     .constraintSize({ minHeight: 56 })
     .alignItems(VerticalAlign.Center)

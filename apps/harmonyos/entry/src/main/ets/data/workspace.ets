@@ -18,6 +18,16 @@ interface WorkspaceSnapshot {
   error: string | null;
 }
 
+/** Patch for WorkspaceStore.set — each field is optional. Named
+ *  interface (not Partial<>) because ArkTS forbids utility types,
+ *  and not an inline literal because ArkTS forbids those as types. */
+interface WorkspacePatch {
+  workspaces?: Workspace[];
+  current?: Workspace | null;
+  loading?: boolean;
+  error?: string | null;
+}
+
 type Listener = (s: WorkspaceSnapshot) => void;
 
 class WorkspaceStore {
@@ -47,8 +57,14 @@ class WorkspaceStore {
     return () => this.listeners.delete(listener);
   }
 
-  private set(patch: Partial<WorkspaceSnapshot>): void {
-    this.snapshot = { ...this.snapshot, ...patch };
+  private set(patch: WorkspacePatch): void {
+    const prev = this.snapshot;
+    this.snapshot = {
+      workspaces: patch.workspaces !== undefined ? patch.workspaces : prev.workspaces,
+      current: patch.current !== undefined ? patch.current : prev.current,
+      loading: patch.loading !== undefined ? patch.loading : prev.loading,
+      error: patch.error !== undefined ? patch.error : prev.error
+    };
     for (const l of this.listeners) l(this.snapshot);
   }
 
@@ -76,7 +92,7 @@ class WorkspaceStore {
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Failed to load workspaces';
       this.set({ loading: false, error: msg });
-      throw err;
+      throw new Error(msg);
     }
   }
 

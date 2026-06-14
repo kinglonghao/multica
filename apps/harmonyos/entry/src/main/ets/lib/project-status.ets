@@ -1,34 +1,32 @@
 import { ProjectStatus, ProjectPriority } from '../models/types';
-import { THEME, ColorScheme } from './theme';
-
-const STATUS_LABELS: Record<string, string> = {
-  planned: 'Planned',
-  in_progress: 'In Progress',
-  paused: 'Paused',
-  completed: 'Completed',
-  cancelled: 'Cancelled'
-};
-
-const PRIORITY_LABELS: Record<string, string> = {
-  no_priority: 'No priority',
-  urgent: 'Urgent',
-  high: 'High',
-  medium: 'Medium',
-  low: 'Low'
-};
+import { ColorScheme, themeTokens } from './theme';
 
 export function projectStatusLabel(status: ProjectStatus | string | null | undefined): string {
   if (!status) return 'Unknown';
-  return STATUS_LABELS[status] ?? status;
+  switch (status) {
+    case 'planned': return 'Planned';
+    case 'in_progress': return 'In Progress';
+    case 'paused': return 'Paused';
+    case 'completed': return 'Completed';
+    case 'cancelled': return 'Cancelled';
+    default: return status;
+  }
 }
 
 export function projectPriorityLabel(priority: ProjectPriority | string | null | undefined): string {
   if (!priority) return 'No priority';
-  return PRIORITY_LABELS[priority] ?? priority;
+  switch (priority) {
+    case 'no_priority': return 'No priority';
+    case 'urgent': return 'Urgent';
+    case 'high': return 'High';
+    case 'medium': return 'Medium';
+    case 'low': return 'Low';
+    default: return priority;
+  }
 }
 
 export function projectStatusColor(status: ProjectStatus | string | null | undefined, scheme: ColorScheme): string {
-  const t = THEME[scheme];
+  const t = themeTokens(scheme);
   switch (status) {
     case 'planned': return String(t.statusBacklog);
     case 'in_progress': return String(t.statusInProgress);
@@ -40,7 +38,7 @@ export function projectStatusColor(status: ProjectStatus | string | null | undef
 }
 
 export function projectPriorityColor(priority: ProjectPriority | string | null | undefined, scheme: ColorScheme): string {
-  const t = THEME[scheme];
+  const t = themeTokens(scheme);
   switch (priority) {
     case 'urgent': return String(t.priorityUrgent);
     case 'high': return String(t.priorityHigh);

@@ -28,45 +28,91 @@ import { ProfilePage } from './ProfilePage';
 import { NotificationsPage } from './NotificationsPage';
 import { AgentsPage } from './AgentsPage';
 import { ChatDetailPage } from './ChatDetailPage';
+import { NavParam } from '../data/navigation';
 
-function readString(param: object | undefined, key: string, fallback: string): string {
+function readString(param: object | undefined, _key: string, fallback: string): string {
   if (param === undefined) return fallback;
-  const map = param as Record<string, string | number | boolean>;
-  const v = map[key];
+  const v = (param as NavParam).value;
   return typeof v === 'string' ? v : fallback;
 }
 
 function readTab(param: object | undefined, fallback: 'issues' | 'projects' | 'pins'): 'issues' | 'projects' | 'pins' {
-  const v = readString(param, 'tab', fallback);
+  if (param === undefined) return fallback;
+  const v = (param as NavParam).value;
   if (v === 'projects' || v === 'pins' || v === 'issues') return v;
   return fallback;
 }
 
+/**
+ * Each branch wraps the page in a `NavDestination()`. The Navigation
+ * component's `navDestination` builder contract (see HarmonyOS docs
+ * for the `navDestination` attribute) requires a single root node —
+ * either a bare `NavDestination` or a custom component layer outside
+ * it. Crucially, that outer custom-component layer must have NO
+ * attributes or events set, otherwise "only blank components are
+ * displayed". Calling the page components directly (e.g.
+ * `LoginPage()`) tripped that rule and was the root cause of the
+ * white-screen on first launch: `aboutToAppear` ran, the framework
+ * rendered the NavDestination chrome (so the back-arrow showed up),
+ * but the page body — which uses chains of `.padding`, `.margin`,
+ * `.backgroundColor`, etc. — was treated as invalid and replaced by
+ * an empty node.
+ *
+ * Wrapping each call in `NavDestination() { Page() }` keeps the
+ * page's @ComponentV2 struct unchanged (and so its `aboutToAppear`
+ * lifecycle, @Local state, and param reading via
+ * `appNavigation.readString`) intact, while satisfying the builder
+ * contract.
+ */
 @Builder
 export function PageDestinations(name: string, param: object): void {
   if (name === 'LoginPage') {
-    LoginPage();
+    NavDestination() {
+      LoginPage();
+    }
   } else if (name === 'VerifyPage') {
-    VerifyPage({ initialEmail: readString(param, 'email', '') });
+    NavDestination() {
+      VerifyPage();
+    }
   } else if (name === 'SelectWorkspacePage') {
-    SelectWorkspacePage();
+    NavDestination() {
+      SelectWorkspacePage();
+    }
   } else if (name === 'IssueDetailPage') {
-    IssueDetailPage({ id: readString(param, 'id', '') });
+    NavDestination() {
+      IssueDetailPage({ issueId: readString(param, 'id', '') });
+    }
   } else if (name === 'ProjectDetailPage') {
-    ProjectDetailPage({ id: readString(param, 'id', '') });
+    NavDestination() {
+      ProjectDetailPage({ projectId: readString(param, 'id', '') });
+    }
   } else if (name === 'NewIssuePage') {
-    NewIssuePage();
+    NavDestination() {
+      NewIssuePage();
+    }
   } else if (name === 'SearchPage') {
-    SearchPage({ initialTab: readTab(param, 'issues') });
+    NavDestination() {
+      SearchPage({ initialTab: readTab(param, 'issues') });
+    }
   } else if (name === 'SwitchWorkspacePage') {
-    SwitchWorkspacePage();
+    NavDestination() {
+      SwitchWorkspacePage();
+    }
   } else if (name === 'ProfilePage') {
-    ProfilePage();
+    NavDestination() {
+      ProfilePage();
+    }
   } else if (name === 'NotificationsPage') {
-    NotificationsPage();
+    NavDestination() {
+      NotificationsPage();
+    }
   } else if (name === 'AgentsPage') {
-    AgentsPage();
+    NavDestination() {
+      AgentsPage();
+    }
   } else if (name === 'ChatDetailPage') {
-    ChatDetailPage({ id: readString(param, 'id', '') });
+    NavDestination() {
+      ChatDetailPage({ chatId: readString(param, 'id', '') });
+    }
   }
 }

@@ -6,10 +6,10 @@
  *
  * Why we hand-roll this instead of pulling in zod: the HarmonyOS
  * build chain (ArkTS) does not ship zod, and the platform's strict
- * type rules forbid `any`. The native zod runtime depends on
- * dynamic property access that ArkTS flags as a strict-mode
- * violation. Instead we provide a thin shim that takes a
- * `Schema<T>` (a small `validate(value): { success, data, error }`
+ * type rules forbid `any`/`unknown`. The native zod runtime
+ * depends on dynamic property access that ArkTS flags as a
+ * strict-mode violation. Instead we provide a thin shim that takes
+ * a `Schema<T>` (a small `validate(value): { success, data, error }`
  * function) and a fallback value. Behavior is identical to
  * `zod::safeParse → on success return parsed; on failure log +
  * return fallback (never throw into UI)`.
@@ -21,7 +21,20 @@
  * for the same reason. Keep this in lockstep with
  * `apps/mobile/lib/parse-response.ts` — both should accept the
  * same shape of arguments and return the same shape of result.
+ *
+ * ArkTS notes (C-1):
+ *   - `unknown` is rejected by `arkts-no-any-unknown`. We use a
+ *     named union `JsonValue` (the wide input type a JSON parser
+ *     can return) as the substitute.
+ *   - `value is T` user-defined type guards are rejected by
+ *     `arkts-no-is`. `isObject` therefore returns plain `boolean`;
+ *     callers narrow with `as Record<string, Object>` at the read
+ *     site (see `lib/schemas.ets`).
  */
+
+/** The widest type a JSON-decoded value can have. ArkTS rejects
+ *  `unknown`, so we name the union explicitly. */
+export type JsonValue = Object | string | number | boolean | null | undefined;
 
 export interface ParseOptions {
   /** Stable telemetry label — typically the endpoint name
@@ -33,6 +46,7 @@ export interface ParseOptions {
 export interface ParseSuccess<T> {
   success: true;
   data: T;
+  issues?: ReadonlyArray<string>;
 }
 
 export interface ParseFailure {
@@ -50,7 +64,7 @@ export type ParseResult<T> = ParseSuccess<T> | ParseFailure;
  * tiny — see the rationale at the top of that file.
  */
 export interface Schema<T> {
-  validate(value: unknown): ParseResult<T>;
+  validate(value: JsonValue): ParseResult<T>;
 }
 
 /**
@@ -61,7 +75,7 @@ export interface Schema<T> {
  * response is a recoverable runtime event, not an exception.
  */
 export function parseWithFallback<T>(
-  value: unknown,
+  value: JsonValue,
   schema: Schema<T>,
   fallback: T,
   opts: ParseOptions
@@ -72,7 +86,7 @@ export function parseWithFallback<T>(
   }
   console.warn(
     `[api] schema validation failed: ${opts.endpoint}`,
-    { issues: result.issues, received: value }
+    value
   );
   return fallback;
 }
@@ -82,9 +96,13 @@ export function parseWithFallback<T>(
  * expect an object can compose with `isObject(value)` to fail
  * fast on the common cases. Keeps the schema bodies in
  * `lib/schemas.ets` readable.
+ *
+ * Returns plain `boolean` (not a type guard) because ArkTS
+ * rejects user-defined `value is T` predicates. Callers narrow
+ * the result with `as Record<string, Object>`.
  */
-export function isObject(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
+export function isObject(value: JsonValue): boolean {
+  return typeof value === 'object' && value !== null;
 }
 
 /**

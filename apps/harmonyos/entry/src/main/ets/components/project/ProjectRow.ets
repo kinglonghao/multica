@@ -1,5 +1,5 @@
 import { Project } from '../../models/types';
-import { ColorScheme, SPACE, RADIUS } from '../../lib/theme';
+import { THEME, ColorScheme, SPACE, RADIUS, space, themeTokens } from '../../lib/theme';
 import { projectStatusLabel, projectPriorityLabel } from '../../lib/project-status';
 import { MulticaText } from '../ui/Text';
 import { ProjectStatusIcon, ProjectPriorityIcon } from '../ui/ProjectStatusIcon';
@@ -16,7 +16,7 @@ export struct ProjectRow {
         MulticaText({
           value: this.project.identifier,
           scheme: this.scheme,
-          size: 'xs',
+          textSize: 'xs',
           weight: 'bold',
           color: 'brandForeground'
         })
@@ -24,49 +24,49 @@ export struct ProjectRow {
       .width(36)
       .height(36)
       .borderRadius(RADIUS.md)
-      .backgroundColor(String(THEME[this.scheme].brand))
-      .margin({ right: SPACE['3'] })
+      .backgroundColor(String(themeTokens(this.scheme).brand))
+      .margin({ right: space('3') })
 
       Column() {
         MulticaText({
           value: this.project.name,
           scheme: this.scheme,
-          size: 'base',
+          textSize: 'base',
           weight: 'medium',
           color: 'foreground',
           maxLines: 1,
           overflow: 'ellipsis'
         })
         Row() {
-          ProjectStatusIcon({ status: this.project.status, scheme: this.scheme, size: 12 })
+          ProjectStatusIcon({ status: this.project.status, scheme: this.scheme, iconSize: 12 })
           MulticaText({
             value: projectStatusLabel(this.project.status),
             scheme: this.scheme,
-            size: 'xs',
+            textSize: 'xs',
             color: 'mutedForeground'
           })
-            .margin({ left: SPACE['1'] })
-          ProjectPriorityIcon({ priority: this.project.priority, scheme: this.scheme, size: 12 })
-            .margin({ left: SPACE['2'] })
+            .margin({ left: space('1') })
+          ProjectPriorityIcon({ priority: this.project.priority, scheme: this.scheme, iconSize: 12 })
+            .margin({ left: space('2') })
           MulticaText({
             value: projectPriorityLabel(this.project.priority),
             scheme: this.scheme,
-            size: 'xs',
+            textSize: 'xs',
             color: 'mutedForeground'
           })
-            .margin({ left: SPACE['1'] })
+            .margin({ left: space('1') })
         }
-        .margin({ top: SPACE['1'] })
+        .margin({ top: space('1') })
       }
       .layoutWeight(1)
       .alignItems(HorizontalAlign.Start)
     }
     .width('100%')
     .padding({
-      left: SPACE['4'],
-      right: SPACE['4'],
-      top: SPACE['3'],
-      bottom: SPACE['3']
+      left: space('4'),
+      right: space('4'),
+      top: space('3'),
+      bottom: space('3')
     })
     .onClick(() => { this.onPress(); })
   }

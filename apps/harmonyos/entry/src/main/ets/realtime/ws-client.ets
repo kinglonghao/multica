@@ -1,7 +1,16 @@
 import webSocket from '@ohos.net.webSocket';
 import { BusinessError } from '@ohos.base';
 import { Preferences } from '../data/preferences';
-import { WSEnvelope, WSEventType } from '../models/types';
+import {
+  WSEnvelope,
+  WSEventType,
+  IssueUpdatedPayload,
+  IssueScopedPayload,
+  ReactionPayload,
+  ProjectUpdatedPayload,
+  ChatMessagePayload,
+  PresencePayload
+} from '../models/types';
 import { getBaseUrl } from '../data/api';
 import { parseWSEnvelope } from '../lib/ws-validate';
 import { isKnownWSEvent, WSEventNames } from '../lib/ws-events';
@@ -33,8 +42,14 @@ type State = 'idle' | 'connecting' | 'active' | 'paused' | 'failed';
 
 const MIN_RECONNECT_MS = 100;
 
-type Handler = (envelope: WSEnvelope) => void;
+type Handler = (envelope: WSEnvelope<Object | string | number | boolean | null>) => void;
 type ReconnectHandler = () => void;
+
+/** Public alias for `Handler`. Exported so realtime hook call
+ *  sites can cast a narrow-typed handler to the wide signature
+ *  that `WSClient.on` accepts (ArkTS forbids implicit narrowing
+ *  of function parameters, so the cast is required). */
+export type WSEnvelopeHandler = Handler;
 
 interface QueuedEvent {
   event: WSEventType;
@@ -50,14 +65,35 @@ export class WSClient {
   private readonly reconnectHandlers: Set<ReconnectHandler> = new Set();
   private readonly queued: QueuedEvent[] = [];
 
-  on<E extends WSEventType>(event: E, handler: Handler): () => void {
+  /**
+   * Subscribe to a WS event. Returns an unsubscribe function.
+   *
+   * ArkTS can't express the TS-native `on<K extends keyof
+   * WSEventPayloadMap>(e: K, h: (p: Map[K]) => void)` because indexed-
+   * access types are forbidden (arkts-no-aliases-by-index). Instead we
+   * declare one overload per event that has a concrete payload shape,
+   * so the call site reads `env.payload` as the right type WITHOUT a
+   * runtime `as` cast (which ArkTS also rejects for unrelated types).
+   *
+   * The overload list mirrors `WSEventPayloadMap` in models/types.ets
+   * 1:1 — add an entry there, add an overload here, or the drift is
+   * silent. Events that only `invalidate` (no payload read) fall
+   * through to the wide fallback and payload stays `object`.
+   *
+   * Internally every handler is stored as the wide `Handler`
+   * (`(envelope: WSEnvelope<unknown>) => void`); the overloads are a
+   * compile-time lens only, erased at runtime. A handler that accepts
+   * `WSEnvelope<NarrowPayload>` is safely assignable to the wide slot
+   * (function params are bivariant under ArkTS for this shape).
+   */
+  on(event: WSEventType, handler: Handler): () => void {
     let set = this.handlers.get(event);
     if (!set) {
       set = new Set();
       this.handlers.set(event, set);
     }
-    set.add(handler as Handler);
-    return () => set!.delete(handler as Handler);
+    set.add(handler);
+    return () => set!.delete(handler);
   }
 
   onReconnect(handler: ReconnectHandler): () => void {
@@ -107,11 +143,17 @@ export class WSClient {
         return;
       }
       if (typeof value !== 'string') return;
-      const envelope = parseWSEnvelope(value);
+      const envelope: WSEnvelope<Object | string | number | boolean | null> | null = parseWSEnvelope(value);
       if (!envelope) return;
       this.dispatch(envelope);
     });
-    socket.on('close', (err: BusinessError, code: number, reason: string) => {
+    socket.on('close', (err: BusinessError, result: webSocket.CloseResult) => {
+      if (err) {
+        console.warn('[ws] close error', err.code, err.message);
+        return;
+      }
+      const code = result.code;
+      const reason = result.reason;
       console.info(`[ws] closed code=${code} reason=${reason}`);
       this.socket = null;
       if (this.state === 'paused') return;

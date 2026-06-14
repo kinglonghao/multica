@@ -51,7 +51,7 @@ export default function wsClientTest(): void {
     it('registers a handler and returns an unsubscribe function', () => {
       const c = new WSClient();
       let calls = 0;
-      const unsub = c.on('inbox:created', () => { calls++; });
+      const unsub = c.on('inbox:new', () => { calls++; });
       expect(typeof unsub).assertEqual('function');
       unsub();
       // The handler should be gone after unsubscribe. We don't

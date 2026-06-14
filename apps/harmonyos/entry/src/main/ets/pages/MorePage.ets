@@ -1,8 +1,8 @@
-import { appNavigation } from '../data/navigation';
+import { appNavigation, navParam } from '../data/navigation';
 import { authStore } from '../data/auth';
 import { workspaceStore } from '../data/workspace';
 import { wsClient } from '../realtime/ws-client';
-import { THEME, ColorScheme, SPACE, RADIUS } from '../lib/theme';
+import { THEME, ColorScheme, SPACE, RADIUS, space, themeTokens } from '../lib/theme';
 import { MulticaText } from '../components/ui/Text';
 import { Header } from '../components/ui/Header';
 import { Avatar } from '../components/ui/Avatar';
@@ -47,11 +47,23 @@ export struct MorePage {
       await authStore.logout();
       // Same pattern as Bug 3 fix — clear to root, then push
       // LoginPage on top so the unauthed state has a visible UI.
-      appNavigation.clearStack();
+      appNavigation.clear();
       appNavigation.pushName('LoginPage');
     } catch (err) {
       this.logoutError = err instanceof Error ? err.message : 'Sign-out failed — please try again';
     }
+  }
+
+  private searchMenuItems(): MenuItem[] {
+    return [
+      { label: 'Projects', onPress: () => appNavigation.pushName('SearchPage', navParam('tab', 'projects')) },
+      { label: 'Issues', onPress: () => appNavigation.pushName('SearchPage', navParam('tab', 'issues')) },
+      { label: 'Pinned', onPress: () => appNavigation.pushName('SearchPage', navParam('tab', 'pins')) },
+      { label: 'Agents', onPress: () => appNavigation.pushName('AgentsPage') },
+      { label: 'Notifications', onPress: () => appNavigation.pushName('NotificationsPage') },
+      { label: 'Profile', onPress: () => appNavigation.pushName('ProfilePage') },
+      { label: 'Switch workspace', onPress: () => appNavigation.pushName('SwitchWorkspacePage') }
+    ];
   }
 
   build() {
@@ -59,29 +71,29 @@ export struct MorePage {
       Header({ title: 'More', scheme: this.scheme })
 
       Row() {
-        Avatar({ name: this.userName, url: '', size: 48, scheme: this.scheme })
+        Avatar({ name: this.userName, url: '', avatarSize: 48, scheme: this.scheme })
         Column() {
           MulticaText({
             value: this.userName,
             scheme: this.scheme,
-            size: 'base',
+            textSize: 'base',
             weight: 'medium',
             color: 'foreground'
           })
           MulticaText({
             value: this.userEmail,
             scheme: this.scheme,
-            size: 'xs',
+            textSize: 'xs',
             color: 'mutedForeground'
           })
-            .margin({ top: SPACE['0.5'] })
+            .margin({ top: space('0.5') })
         }
         .layoutWeight(1)
-        .margin({ left: SPACE['3'] })
+        .margin({ left: space('3') })
         .alignItems(HorizontalAlign.Start)
       }
       .width('100%')
-      .padding(SPACE['4'])
+      .padding(space('4'))
       .onClick(() => { appNavigation.pushName('ProfilePage'); })
 
       if (this.workspaceName) {
@@ -89,24 +101,16 @@ export struct MorePage {
           MulticaText({
             value: `Workspace: ${this.workspaceName}`,
             scheme: this.scheme,
-            size: 'sm',
+            textSize: 'sm',
             color: 'mutedForeground'
           })
         }
         .width('100%')
-        .padding({ left: SPACE['4'], right: SPACE['4'], bottom: SPACE['2'] })
+        .padding({ left: space('4'), right: space('4'), bottom: space('2') })
         .onClick(() => { appNavigation.pushName('SwitchWorkspacePage'); })
       }
 
-      this.MenuList([
-        { label: 'Projects', onPress: () => appNavigation.pushName('SearchPage', { tab: 'projects' }) },
-        { label: 'Issues', onPress: () => appNavigation.pushName('SearchPage', { tab: 'issues' }) },
-        { label: 'Pinned', onPress: () => appNavigation.pushName('SearchPage', { tab: 'pins' }) },
-        { label: 'Agents', onPress: () => appNavigation.pushName('AgentsPage') },
-        { label: 'Notifications', onPress: () => appNavigation.pushName('NotificationsPage') },
-        { label: 'Profile', onPress: () => appNavigation.pushName('ProfilePage') },
-        { label: 'Switch workspace', onPress: () => appNavigation.pushName('SwitchWorkspacePage') }
-      ])
+      this.MenuList(this.searchMenuItems())
 
       Blank()
 
@@ -114,32 +118,32 @@ export struct MorePage {
         MulticaText({
           value: this.logoutError,
           scheme: this.scheme,
-          size: 'sm',
+          textSize: 'sm',
           color: 'destructive'
         })
-          .margin({ left: SPACE['4'], right: SPACE['4'], bottom: SPACE['2'] })
+          .margin({ left: space('4'), right: space('4'), bottom: space('2') })
       }
 
       Row() {
         MulticaText({
           value: 'Sign out',
           scheme: this.scheme,
-          size: 'base',
+          textSize: 'base',
           weight: 'medium',
           color: 'destructive',
-          textAlign: TextAlign.Center
+          textAlign: 'center'
         })
       }
       .width('100%')
-      .padding(SPACE['4'])
-      .backgroundColor(String(THEME[this.scheme].card))
+      .padding(space('4'))
+      .backgroundColor(String(themeTokens(this.scheme).card))
       .borderRadius(RADIUS.md)
-      .margin({ left: SPACE['4'], right: SPACE['4'], bottom: SPACE['4'] })
+      .margin({ left: space('4'), right: space('4'), bottom: space('4') })
       .onClick(() => { void this.logout(); })
     }
     .width('100%')
     .height('100%')
-    .backgroundColor(String(THEME[this.scheme].background))
+    .backgroundColor(String(themeTokens(this.scheme).background))
   }
 
   @Builder MenuList(items: MenuItem[]) {
@@ -149,19 +153,19 @@ export struct MorePage {
           MulticaText({
             value: item.label,
             scheme: this.scheme,
-            size: 'base',
+            textSize: 'base',
             color: 'foreground'
           })
         }
         .width('100%')
-        .padding({ left: SPACE['4'], right: SPACE['4'], top: SPACE['3'], bottom: SPACE['3'] })
+        .padding({ left: space('4'), right: space('4'), top: space('3'), bottom: space('3') })
         .onClick(() => { item.onPress(); })
       })
     }
     .width('100%')
     .border({
       width: { top: 1, bottom: 1 },
-      color: String(THEME[this.scheme].border)
+      color: String(themeTokens(this.scheme).border)
     })
   }
 }

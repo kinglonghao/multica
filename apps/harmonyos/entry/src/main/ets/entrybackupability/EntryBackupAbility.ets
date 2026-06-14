@@ -1,5 +1,5 @@
 import hilog from '@ohos.hilog';
-import { BackupExtensionAbility, BundleVersion } from '@ohos.application.BackupExtensionAbility';
+import BackupExtensionAbility, { BundleVersion } from '@ohos.application.BackupExtensionAbility';
 
 const DOMAIN = 0x0000;
 const TAG = 'EntryBackupAbility';

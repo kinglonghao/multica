@@ -1,8 +1,9 @@
 import { appNavigation } from '../data/navigation';
+import { authStore } from '../data/auth';
 import { globalEvents } from '../data/auth';
 import { workspaceStore } from '../data/workspace';
 import { wsClient } from '../realtime/ws-client';
-import { THEME, ColorScheme, SPACE, textColor, TextColorKey } from '../lib/theme';
+import { THEME, ColorScheme, SPACE, textColor, TextColorKey, space, themeTokens } from '../lib/theme';
 import { MulticaText } from '../components/ui/Text';
 import { Skeleton } from '../components/ui/Skeleton';
 import { InboxPage } from './InboxPage';
@@ -17,15 +18,31 @@ export struct WorkspaceLayout {
   @Local bootstrapping: boolean = true;
   private authUnsub?: () => void;
   private wsUnsub?: () => void;
+  // Bug 12 fix: subscribe to authStore state so that when the user
+  // completes the OTP flow (LoginPage → VerifyPage → clear stack),
+  // we kick off bootstrap even though aboutToAppear already ran
+  // with state='uninitialized' and returned early. Without this
+  // subscription, fetchWorkspaces() never runs on first login,
+  // workspaceSlug stays null, and every /api/* request returns
+  // 400 because X-Workspace-Slug is undefined.
+  private authStateUnsub?: () => void;
+  private bootStarted: boolean = false;
 
   aboutToAppear(): void {
     this.scheme = this.detectScheme();
     this.authUnsub = globalEvents.on('auth:required', () => {
-      appNavigation.clearStack();
+      appNavigation.clear();
       appNavigation.pushName('LoginPage');
     });
     this.wsUnsub = globalEvents.on('workspace:changed', () => {
       this.recheckWorkspace();
+    });
+    this.authStateUnsub = authStore.subscribe((s) => {
+      if (s.state === 'authed' && !this.bootStarted) {
+        this.bootStarted = true;
+        this.bootRealtime();
+        void this.bootstrap();
+      }
     });
     // Bug 2 fix: if the user is unauthed when this shell mounts,
     // immediately overlay the login destination. Without this, the
@@ -36,6 +53,7 @@ export struct WorkspaceLayout {
       this.bootstrapping = false;
       return;
     }
+    this.bootStarted = true;
     this.bootRealtime();
     void this.bootstrap();
   }
@@ -43,6 +61,7 @@ export struct WorkspaceLayout {
   aboutToDisappear(): void {
     this.authUnsub?.();
     this.wsUnsub?.();
+    this.authStateUnsub?.();
     // Disconnect the WS on leave so a forced sign-out (auth:required)
     // doesn't leave the socket connected and continuing to receive
     // events for a workspace the user no longer has access to.
@@ -76,7 +95,7 @@ export struct WorkspaceLayout {
 
   private recheckWorkspace(): void {
     if (!workspaceStore.currentId) {
-      appNavigation.clearStack();
+      appNavigation.clear();
       appNavigation.pushName('SelectWorkspacePage');
     }
   }
@@ -85,14 +104,14 @@ export struct WorkspaceLayout {
     if (this.bootstrapping) {
       Stack({ alignContent: Alignment.Center }) {
         Column() {
-          Skeleton({ scheme: this.scheme, width: 200, height: 24, radius: 6 })
-          Skeleton({ scheme: this.scheme, width: 120, height: 16, radius: 4 })
-            .margin({ top: SPACE['2'] })
+          Skeleton({ scheme: this.scheme, skeletonWidth: 200, skeletonHeight: 24, radius: 6 })
+          Skeleton({ scheme: this.scheme, skeletonWidth: 120, skeletonHeight: 16, radius: 4 })
+            .margin({ top: space('2') })
         }
       }
       .width('100%')
       .height('100%')
-      .backgroundColor(String(THEME[this.scheme].background))
+      .backgroundColor(String(themeTokens(this.scheme).background))
     } else {
       Column() {
         Stack() {
@@ -113,35 +132,39 @@ export struct WorkspaceLayout {
       }
       .width('100%')
       .height('100%')
-      .backgroundColor(String(THEME[this.scheme].background))
+      .backgroundColor(String(themeTokens(this.scheme).background))
     }
   }
 
   @Builder TabBar() {
     Row() {
-      this.TabButton(0, $r('app.string.nav_inbox'), $r('sys.symbol.tray_fill'))
-      this.TabButton(1, $r('app.string.nav_my_issues'), $r('sys.symbol.checkmark_square'))
-      this.TabButton(2, $r('app.string.nav_chat'), $r('sys.symbol.bubble_left_fill'))
-      this.TabButton(3, $r('app.string.nav_more'), $r('sys.symbol.line_3_horizontal'))
+      this.TabButton(0, $r('app.string.nav_inbox'), 'I')
+      this.TabButton(1, $r('app.string.nav_my_issues'), 'T')
+      this.TabButton(2, $r('app.string.nav_chat'), 'C')
+      this.TabButton(3, $r('app.string.nav_more'), 'M')
     }
     .width('100%')
     .height(56)
-    .backgroundColor(String(THEME[this.scheme].background))
+    .backgroundColor(String(themeTokens(this.scheme).background))
     .border({
       width: { top: 1 },
-      color: String(THEME[this.scheme].border)
+      color: String(themeTokens(this.scheme).border)
     })
   }
 
-  @Builder TabButton(index: number, label: Resource, glyph: Resource) {
+  @Builder TabButton(index: number, label: Resource, glyph: string) {
     Column() {
-      SymbolGlyph(glyph)
-        .fontSize(20)
-        .fontColor([textColor(this.scheme, this.tabColorKey(index))])
+      MulticaText({
+        value: glyph,
+        scheme: this.scheme,
+        textSize: 'base',
+        weight: 'bold',
+        color: this.tabColorKey(index)
+      })
       MulticaText({
         value: this.resolveLabel(label),
         scheme: this.scheme,
-        size: 'xs',
+        textSize: 'xs',
         color: this.tabColorKey(index)
       })
         .margin({ top: 2 })

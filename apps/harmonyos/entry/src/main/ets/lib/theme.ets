@@ -74,6 +74,61 @@ export interface ThemeTokens {
   priorityNone: string;
 }
 
+interface ThemeMap {
+  light: ThemeTokens;
+  dark: ThemeTokens;
+}
+
+interface SpaceTokens {
+  '0': number;
+  '0.5': number;
+  '1': number;
+  '1.5': number;
+  '2': number;
+  '2.5': number;
+  '3': number;
+  '3.5': number;
+  '4': number;
+  '5': number;
+  '6': number;
+  '7': number;
+  '8': number;
+  '9': number;
+  '10': number;
+  '12': number;
+  '16': number;
+  '20': number;
+}
+
+interface RadiusTokens {
+  none: number;
+  sm: number;
+  DEFAULT: number;
+  md: number;
+  lg: number;
+  xl: number;
+  '2xl': number;
+  full: number;
+}
+
+interface FontSizeTokens {
+  xs: number;
+  sm: number;
+  base: number;
+  md: number;
+  lg: number;
+  xl: number;
+  '2xl': number;
+  '3xl': number;
+}
+
+interface FontWeightTokens {
+  normal: number;
+  medium: number;
+  semibold: number;
+  bold: number;
+}
+
 const light: ThemeTokens = {
   background: '#FFFFFF',
   card: '#F7F7F8',
@@ -134,7 +189,7 @@ const dark: ThemeTokens = {
   priorityNone: '#52525B'
 };
 
-export const THEME: Record<ColorScheme, ThemeTokens> = {
+export const THEME: ThemeMap = {
   light,
   dark
 };
@@ -148,7 +203,7 @@ export const THEME: Record<ColorScheme, ThemeTokens> = {
  */
 export const textColor: (scheme: ColorScheme, key: TextColorKey) => string =
   (scheme: ColorScheme, key: TextColorKey): string => {
-    const t = THEME[scheme];
+    const t = themeTokens(scheme);
     switch (key) {
       case 'foreground': return t.foreground;
       case 'mutedForeground': return t.mutedForeground;
@@ -167,7 +222,7 @@ export const textColor: (scheme: ColorScheme, key: TextColorKey) => string =
  * (virtual pixels) with a 4-unit system that's close enough to call
  * 1:1. The 1.5/2.5 increments follow Tailwind's half-steps.
  */
-export const SPACE: Record<SpaceKey, number> = {
+export const SPACE: SpaceTokens = {
   '0': 0,
   '0.5': 2,
   '1': 4,
@@ -188,7 +243,7 @@ export const SPACE: Record<SpaceKey, number> = {
   '20': 80
 };
 
-export const RADIUS: Record<RadiusKey, number> = {
+export const RADIUS: RadiusTokens = {
   none: 0,
   sm: 4,
   DEFAULT: 6,
@@ -199,7 +254,7 @@ export const RADIUS: Record<RadiusKey, number> = {
   full: 9999
 };
 
-export const FONT_SIZE: Record<FontSizeKey, number> = {
+export const FONT_SIZE: FontSizeTokens = {
   xs: 11,
   sm: 13,
   base: 14,
@@ -210,9 +265,67 @@ export const FONT_SIZE: Record<FontSizeKey, number> = {
   '3xl': 30
 };
 
-export const FONT_WEIGHT: Record<FontWeightKey, number> = {
+export const FONT_WEIGHT: FontWeightTokens = {
   normal: 400,
   medium: 500,
   semibold: 600,
   bold: 700
 };
+
+export function themeTokens(scheme: ColorScheme): ThemeTokens {
+  switch (scheme) {
+    case 'dark':
+      return dark;
+    case 'light':
+    default:
+      return light;
+  }
+}
+
+export function space(key: SpaceKey): number {
+  switch (key) {
+    case '0': return 0;
+    case '0.5': return 2;
+    case '1': return 4;
+    case '1.5': return 6;
+    case '2': return 8;
+    case '2.5': return 10;
+    case '3': return 12;
+    case '3.5': return 14;
+    case '4': return 16;
+    case '5': return 20;
+    case '6': return 24;
+    case '7': return 28;
+    case '8': return 32;
+    case '9': return 36;
+    case '10': return 40;
+    case '12': return 48;
+    case '16': return 64;
+    case '20': return 80;
+    default: return 0;
+  }
+}
+
+export function fontSize(key: FontSizeKey): number {
+  switch (key) {
+    case 'xs': return 11;
+    case 'sm': return 13;
+    case 'base': return 14;
+    case 'md': return 15;
+    case 'lg': return 17;
+    case 'xl': return 20;
+    case '2xl': return 24;
+    case '3xl': return 30;
+    default: return 14;
+  }
+}
+
+export function fontWeight(key: FontWeightKey): number {
+  switch (key) {
+    case 'normal': return 400;
+    case 'medium': return 500;
+    case 'semibold': return 600;
+    case 'bold': return 700;
+    default: return 400;
+  }
+}

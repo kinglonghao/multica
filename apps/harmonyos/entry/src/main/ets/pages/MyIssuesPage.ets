@@ -1,11 +1,11 @@
-import { appNavigation } from '../data/navigation';
+import { appNavigation, navParam } from '../data/navigation';
 import { useIssueListQuery, QueryHandle } from '../queries/issue';
-import { THEME, ColorScheme, SPACE } from '../lib/theme';
+import { THEME, ColorScheme, SPACE, space, themeTokens } from '../lib/theme';
 import { MulticaText } from '../components/ui/Text';
 import { Header } from '../components/ui/Header';
 import { Skeleton } from '../components/ui/Skeleton';
 import { IssueRow } from '../components/issue/IssueRow';
-import { ListIssuesResponse } from '../models/types';
+import { Issue, ListIssuesResponse } from '../models/types';
 
 @ComponentV2
 export struct MyIssuesPage {
@@ -26,81 +26,95 @@ export struct MyIssuesPage {
     return 'light';
   }
 
+  private queryState() {
+    return this.query ? this.query.getState() : null;
+  }
+
+  private issueItems() {
+    return this.queryState()?.data?.issues ?? [];
+  }
+
   build() {
     Column() {
       Header({ title: 'My Issues', scheme: this.scheme })
-
-      if (!this.query) {
-        return;
-      }
-      const state = this.query.getState();
-      if (state.isLoading) {
-        Column() {
-          ForEach([1, 2, 3, 4, 5], () => {
-            Row() {
-              Skeleton({ scheme: this.scheme, width: '85%', height: 18, radius: 4 })
-            }
-            .padding({ left: SPACE['4'], right: SPACE['4'], top: SPACE['3'], bottom: SPACE['3'] })
-          })
-        }
-      } else if (state.error) {
-        MulticaText({
-          value: `Failed to load issues: ${state.error!.message}`,
-          scheme: this.scheme,
-          size: 'sm',
-          color: 'destructive'
-        })
-          .padding(SPACE['4'])
-      } else {
-        const issues = state.data?.issues ?? [];
-        if (issues.length === 0) {
-          Stack({ alignContent: Alignment.Center }) {
-            MulticaText({
-              value: 'No open issues — you\'re all caught up!',
-              scheme: this.scheme,
-              size: 'sm',
-              color: 'mutedForeground',
-              textAlign: TextAlign.Center
-            })
-          }
-          .layoutWeight(1)
-          .width('100%')
-        } else {
-          List({ space: 0 }) {
-            ForEach(issues, (issue) => {
-              ListItem() {
-                IssueRow({
-                  issue: issue,
-                  scheme: this.scheme,
-                  onPress: () => { appNavigation.pushName('IssueDetailPage', { id: issue.id }); }
-                })
-              }
-              .divider({ strokeWidth: 1, color: String(THEME[this.scheme].border) })
-            })
-          }
-          .layoutWeight(1)
-          .width('100%')
-        }
-      }
-
-      Row() {
-        MulticaText({
-          value: '+',
-          scheme: this.scheme,
-          size: 'xl',
-          weight: 'bold',
-          color: 'brandForeground'
-        })
-      }
-      .width('100%')
-      .height(56)
-      .backgroundColor(String(THEME[this.scheme].brand))
-      .justifyContent(FlexAlign.Center)
-      .alignItems(HorizontalAlign.Center)
-      .onClick(() => { appNavigation.pushName('NewIssuePage'); })
+      this.Body()
+      this.FloatingAction()
     }
     .width('100%')
     .height('100%')
-    .backgroundColor(String(THEME[this.scheme].background))
+    .backgroundColor(String(themeTokens(this.scheme).background))
+  }
+
+  @Builder private Body() {
+    if (!this.queryState()) {
+      Blank().layoutWeight(1)
+    } else if (this.queryState()!.isLoading) {
+      Column() {
+        ForEach([1, 2, 3, 4, 5], () => {
+          Row() {
+            Skeleton({ scheme: this.scheme, skeletonWidth: '85%', skeletonHeight: 18, radius: 4 })
+          }
+          .padding({ left: space('4'), right: space('4'), top: space('3'), bottom: space('3') })
+        })
+      }
+      .layoutWeight(1)
+      .width('100%')
+    } else if (this.queryState()!.error) {
+      MulticaText({
+        value: `Failed to load issues: ${this.queryState()!.error!.message}`,
+        scheme: this.scheme,
+        textSize: 'sm',
+        color: 'destructive'
+      })
+        .padding(space('4'))
+    } else if (this.issueItems().length === 0) {
+      Stack({ alignContent: Alignment.Center }) {
+        MulticaText({
+          value: 'No open issues — you\'re all caught up!',
+          scheme: this.scheme,
+          textSize: 'sm',
+          color: 'mutedForeground',
+          textAlign: 'center'
+        })
+      }
+      .layoutWeight(1)
+      .width('100%')
+    } else {
+      List({ space: 0 }) {
+        ForEach(this.issueItems(), (issue: Issue) => {
+          ListItem() {
+            IssueRow({
+              issue: issue,
+              scheme: this.scheme,
+              onPress: () => { appNavigation.pushName('IssueDetailPage', navParam('id', issue.id)); }
+            })
+          }
+          .border({
+            width: { bottom: 1 },
+            color: String(themeTokens(this.scheme).border)
+          })
+        })
+      }
+      .layoutWeight(1)
+      .width('100%')
+    }
+  }
+
+  @Builder private FloatingAction() {
+    Row() {
+      MulticaText({
+        value: '+',
+        scheme: this.scheme,
+        textSize: 'xl',
+        weight: 'bold',
+        color: 'brandForeground'
+      })
+    }
+    .width('100%')
+    .height(56)
+    .backgroundColor(String(themeTokens(this.scheme).brand))
+    .justifyContent(FlexAlign.Center)
+    .alignItems(VerticalAlign.Center)
+    .onClick(() => { appNavigation.pushName('NewIssuePage'); })
   }
 }
