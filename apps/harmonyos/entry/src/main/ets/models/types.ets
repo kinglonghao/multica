@@ -221,6 +221,7 @@ export interface Comment {
   id: string;
   issue_id: string;
   body: string;
+  content?: string | null;
   author_id: string;
   author_name?: string | null;
   author_avatar_url?: string | null;

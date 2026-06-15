@@ -556,8 +556,13 @@ class ApiClient {
 
   // -------- Members --------
 
-  async listMembers(opts?: RequestOpts): Promise<MemberWithUser[]> {
-    return this.request<MemberWithUser[]>('GET', '/api/members', undefined, opts);
+  async listMembers(workspaceId: string, opts?: RequestOpts): Promise<MemberWithUser[]> {
+    return this.request<MemberWithUser[]>(
+      'GET',
+      `/api/workspaces/${workspaceId}/members`,
+      undefined,
+      opts
+    );
   }
 
   // -------- Squads --------

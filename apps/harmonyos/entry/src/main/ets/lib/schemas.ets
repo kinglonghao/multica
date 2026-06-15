@@ -355,6 +355,7 @@ export const EMPTY_COMMENT: Comment = {
   id: '',
   issue_id: '',
   body: '',
+  content: '',
   author_id: '',
   author_name: null,
   author_avatar_url: null,
@@ -373,7 +374,8 @@ class CommentSchemaImpl implements Schema<Comment> {
     const data: Comment = {
       id,
       issue_id: readString(value, 'issue_id', ''),
-      body: readString(value, 'body', ''),
+      body: readString(value, 'body', readString(value, 'content', '')),
+      content: readString(value, 'content', readString(value, 'body', '')),
       author_id: readString(value, 'author_id', ''),
       author_name: readNullableString(value, 'author_name'),
       author_avatar_url: readNullableString(value, 'author_avatar_url'),

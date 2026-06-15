@@ -122,3 +122,7 @@ allowed to differ in **product semantics**. The mirroring rules from
   `apps/desktop/` or any of the shared `packages/`. The type mirror
   in `models/types.ets` is a maintenance responsibility, not a
   build-time dependency.
+
+编译命令：
+
+/Applications/DevEco-Studio.app/Contents/tools/node/bin/node /Applications/DevEco-Studio.app/Contents/tools/hvigor/bin/hvigorw.js --mode module -p module=entry@default -p product=default -p ohos-enable-hwasan=false -p requiredDeviceType=phone -p ohos-enable-ubsan=false assembleDevHqf --analyze=normal --parallel --incremental --daemon

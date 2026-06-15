@@ -51,6 +51,27 @@ const futureIn: (ms: number) => string = (ms: number): string => {
   return `in ${Math.floor(days / 365)}y`;
 };
 
+export const stripMarkdownForDisplay: (md: string | null | undefined) => string =
+  (md: string | null | undefined): string => {
+    if (!md) return '';
+    return md
+      .replace(/```[\s\S]*?```/g, '[code block]')
+      .replace(/`([^`]+)`/g, '$1')
+      .replace(/!\[[^\]]*\]\([^)]*\)/g, '📷')
+      .replace(/\[([^\]]+)\]\(mention:\/\/[^)]+\)/g, '$1')
+      .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
+      .replace(/^#{1,6}\s*/gm, '')
+      .replace(/\*\*([^*]+)\*\*/g, '$1')
+      .replace(/__([^_]+)__/g, '$1')
+      .replace(/\*([^*]+)\*/g, '$1')
+      .replace(/_([^_]+)_/g, '$1')
+      .replace(/^>\s?/gm, '')
+      .replace(/^[-*+]\s+/gm, '• ')
+      .replace(/^\d+\.\s+/gm, '• ')
+      .replace(/\n{3,}/g, '\n\n')
+      .trim();
+  };
+
 /**
  * Class-merge helper. Mirrors apps/mobile/lib/utils.ts `cn()`. ArkUI
  * doesn't use string class names the way web does, but we keep the
