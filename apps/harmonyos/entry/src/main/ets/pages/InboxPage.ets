@@ -20,6 +20,19 @@ export struct InboxPage {
   @Local scheme: ColorScheme = 'light';
   @Local version: number = 0;
   @Local issueCache: Map<string, Issue> = new Map();
+  // H-1 fix: ArkUI's reactive system only tracks @Local fields that
+  // are *actually read* inside build(). The previous attempts
+  // (version++, renderTick++, .id(renderTick)) all failed because
+  // build() never touched those fields in a way ArkUI would track.
+  // The reliable fix is to mirror the three cache fields we render
+  // on into @Local slots, then read those slots inside build() —
+  // `if (this._isLoading)` is a guaranteed observable read.
+  // syncFromCache() runs from aboutToAppear and from the cache's
+  // onUpdate callback, so the mirrors stay in lockstep with the
+  // cache and ArkUI rebuilds the subtree on every change.
+  @Local _isLoading: boolean = true;
+  @Local _data: InboxItem[] | undefined = undefined;
+  @Local _error: Error | null = null;
   private query: QueryHandle<InboxItem[]> | null = null;
   // Bug 9 fix: hydrateIssueCache can fire from BOTH aboutToAppear
   // and the onUpdate callback. Without this Set, two concurrent
@@ -28,13 +41,17 @@ export struct InboxPage {
   // issue. The Set tracks IDs whose fetch is in flight.
   private hydrationInFlight: Set<string> = new Set();
   private wsUnsub?: () => void;
+  private globalUnsub?: () => void;
 
   aboutToAppear(): void {
     this.scheme = this.detectScheme();
     this.query = useInboxQuery(() => {
       this.version++;
+      this.syncFromCache();
       void this.hydrateIssueCache();
     });
+    this.globalUnsub = queryClient.onAnyStateChange(() => { this.syncFromCache(); });
+    this.syncFromCache();
     void this.hydrateIssueCache();
     // Subscribe to the iOS-parity inbox events
     // (inbox:new/read/archived + batch variants) for the current
@@ -43,9 +60,25 @@ export struct InboxPage {
     this.wsUnsub = useInboxRealtime();
   }
 
+  /**
+   * Mirror the cache's current state into @Local fields. The cache
+   * state itself is not a @Local (it's stored in a Map on a
+   * singleton), so reads via this.query.getState() inside build()
+   * don't trigger re-renders. The @Local mirrors ARE tracked, so
+   * every assignment from this method schedules a build.
+   */
+  private syncFromCache(): void {
+    if (!this.query) return;
+    const s = this.query.getState();
+    this._isLoading = s.isLoading;
+    this._data = s.data as InboxItem[] | undefined;
+    this._error = s.error;
+  }
+
   aboutToDisappear(): void {
     this.query?.unsubscribe();
     this.wsUnsub?.();
+    this.globalUnsub?.();
   }
 
   private detectScheme(): ColorScheme {
@@ -104,18 +137,20 @@ export struct InboxPage {
         right: this.ActionsRow()
       })
 
-      if (!this.query) {
-        this.EmptyState()
-      } else if (this.query.getState().isLoading) {
+      // H-1 fix: read from the @Local mirrors, not from the cache
+      // directly. ArkUI tracks these reads; cache.getState() reads
+      // would not.
+      if (this._isLoading) {
         this.LoadingState()
-      } else if (this.query.getState().error) {
-        this.ErrorState(this.query.getState().error!.message)
-      } else if (deduplicateInboxItems(this.query.getState().data ?? []).length === 0) {
+      } else if (this._error) {
+        this.ErrorState(this._error.message)
+      } else if (deduplicateInboxItems(this._data ?? []).length === 0) {
         this.EmptyState()
       } else {
-        this.List(deduplicateInboxItems(this.query.getState().data ?? []))
+        this.List(deduplicateInboxItems(this._data ?? []))
       }
     }
+    .id(`InboxPage-v${this.version}`)
     .width('100%')
     .height('100%')
     .backgroundColor(String(themeTokens(this.scheme).background))
@@ -234,6 +269,11 @@ export struct InboxPage {
         return copy;
       });
     });
+    // H-1 fix: setQueryData doesn't fire the observer, so the
+    // @Local mirrors in this page don't get the optimistic update
+    // unless we sync them by hand. Pull the just-written data into
+    // _data so the UI flips immediately.
+    this.syncFromCache();
     try {
       await api.archiveAllReadInbox();
     } finally {

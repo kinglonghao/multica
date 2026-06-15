@@ -1,6 +1,6 @@
 import { appNavigation } from '../data/navigation';
 import { api } from '../data/api';
-import { useQuery, QueryHandle, FetchContext } from '../queries/cache';
+import { useQuery, QueryHandle, FetchContext, queryClient } from '../queries/cache';
 import { useChatRealtime } from '../realtime/realtime-hooks';
 import { ChatMessage, ChatSession } from '../models/types';
 import { THEME, ColorScheme, SPACE, RADIUS, space, themeTokens } from '../lib/theme';
@@ -19,22 +19,32 @@ export struct ChatDetailPage {
   @Local inputDraft: string = '';
   @Local sending: boolean = false;
   @Local sendError: string = '';
+  // H-1 fix: @Local mirrors. See InboxPage.ets.
+  @Local _session: ChatSession | undefined = undefined;
+  @Local _sessionIsLoading: boolean = true;
+  @Local _sessionError: Error | null = null;
+  @Local _messages: ChatMessage[] | undefined = undefined;
+  @Local _messagesIsLoading: boolean = true;
+  @Local _messagesError: Error | null = null;
   private session: QueryHandle<ChatSession> | null = null;
   private messages: QueryHandle<ChatMessage[]> | null = null;
   private wsUnsub?: () => void;
+  private globalUnsub?: () => void;
 
   aboutToAppear(): void {
     this.scheme = this.detectScheme();
     this.session = useQuery<ChatSession>(
       ['chat-session', this.chatId],
       (ctx: FetchContext) => api.getChatSession(this.chatId, { cancelToken: ctx.cancelToken }),
-      { staleTimeMs: 30_000, onUpdate: () => { this.version++; } }
+      { staleTimeMs: 30_000, onUpdate: () => { this.version++; this.syncFromCache(); } }
     );
     this.messages = useQuery<ChatMessage[]>(
       ['chat-messages', this.chatId],
       (ctx: FetchContext) => api.listChatMessages(this.chatId, { cancelToken: ctx.cancelToken }),
-      { staleTimeMs: 10_000, onUpdate: () => { this.version++; } }
+      { staleTimeMs: 10_000, onUpdate: () => { this.version++; this.syncFromCache(); } }
     );
+    this.globalUnsub = queryClient.onAnyStateChange(() => { this.syncFromCache(); });
+    this.syncFromCache();
     // Subscribe to chat:message events for this session. The
     // hook patches the cache in place — incoming assistant
     // messages stream in without a refetch.
@@ -45,10 +55,26 @@ export struct ChatDetailPage {
     this.session?.unsubscribe();
     this.messages?.unsubscribe();
     this.wsUnsub?.();
+    this.globalUnsub?.();
   }
 
   private detectScheme(): ColorScheme {
     return 'light';
+  }
+
+  private syncFromCache(): void {
+    if (this.session) {
+      const s = this.session.getState();
+      this._session = s.data as ChatSession | undefined;
+      this._sessionIsLoading = s.isLoading;
+      this._sessionError = s.error;
+    }
+    if (this.messages) {
+      const s = this.messages.getState();
+      this._messages = s.data as ChatMessage[] | undefined;
+      this._messagesIsLoading = s.isLoading;
+      this._messagesError = s.error;
+    }
   }
 
   private async send(): Promise<void> {
@@ -70,37 +96,41 @@ export struct ChatDetailPage {
     }
   }
 
-  private messagesState() {
-    return this.messages ? this.messages.getState() : null;
-  }
-
-  private sessionState() {
-    return this.session ? this.session.getState() : null;
-  }
-
   build() {
     Column() {
       Header({
-        title: this.session?.getState().data?.title ?? 'Chat',
+        title: this._session?.title ?? 'Chat',
         scheme: this.scheme,
         left: this.BackButton()
       })
 
-      if (!this.messagesState()) {
-        Blank().layoutWeight(1)
+      if (this._messagesIsLoading) {
+        Scroll() {
+          Column() {
+            ForEach([1, 2, 3], () => {
+              Skeleton({ scheme: this.scheme, skeletonWidth: '90%', skeletonHeight: 40, radius: 8 })
+                .margin({ top: space('2'), left: space('4'), right: space('4') })
+            })
+          }
+          .width('100%')
+          .padding({ top: space('2'), bottom: space('2') })
+        }
+        .layoutWeight(1)
+        .width('100%')
+      } else if (this._messagesError) {
+        MulticaText({
+          value: `Failed to load messages: ${this._messagesError.message}`,
+          scheme: this.scheme,
+          textSize: 'sm',
+          color: 'destructive'
+        })
+          .padding(space('4'))
       } else {
         Scroll() {
           Column() {
-            if (this.messagesState()!.isLoading) {
-              ForEach([1, 2, 3], () => {
-                Skeleton({ scheme: this.scheme, skeletonWidth: '90%', skeletonHeight: 40, radius: 8 })
-                  .margin({ top: space('2'), left: space('4'), right: space('4') })
-              })
-            } else if (this.messagesState()!.data) {
-              ForEach(this.messagesState()!.data!, (msg: ChatMessage) => {
-                this.MessageRow(msg, this.sessionState()?.data)
-              })
-            }
+            ForEach(this._messages ?? [], (msg: ChatMessage) => {
+              this.MessageRow(msg, this._session)
+            })
           }
           .width('100%')
           .padding({ top: space('2'), bottom: space('2') })

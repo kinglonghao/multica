@@ -350,11 +350,15 @@ class QueryClient {
         staleTimeMs: 0,
         observers: new Set()
       });
+      this.notifyGlobal();
     }
   }
 
   invalidate(key: QueryKey): void {
     this.entries.delete(this.keyOf(key));
+    // H-1 fix: page-level @Local mirrors must re-sync after a
+    // delete so the UI can drop the now-stale data.
+    this.notifyGlobal();
   }
 
   /**
@@ -372,6 +376,7 @@ class QueryClient {
         this.entries.delete(key);
       }
     }
+    this.notifyGlobal();
   }
 
   clear(): void {
@@ -379,6 +384,35 @@ class QueryClient {
       entry.cancelToken?.abort();
     }
     this.entries.clear();
+    this.notifyGlobal();
+  }
+
+  // H-1 fix: a global "anything changed" hook so pages can mirror
+  // cache state into @Local fields. The per-query onUpdate callback
+  // path was unreliable because ArkUI only tracks @Local fields that
+  // build() actually reads, and a single callback couldn't guarantee
+  // its assignment landed in a slot the build() body referenced. A
+  // page subscribes once with `onAnyStateChange(cb)`, the cb reads
+  // the relevant cache entries and writes them into @Local mirrors,
+  // and the page's build() reads those mirrors — which ArkUI
+  // *does* track because the build body references them directly.
+  private readonly globalListeners: Set<() => void> = new Set();
+
+  onAnyStateChange(cb: () => void): () => void {
+    this.globalListeners.add(cb);
+    return () => {
+      this.globalListeners.delete(cb);
+    };
+  }
+
+  private notifyGlobal(): void {
+    for (const cb of Array.from(this.globalListeners)) {
+      try {
+        cb();
+      } catch (err) {
+        console.warn('[query] global listener threw', err);
+      }
+    }
   }
 
   private notify(stringKey: string): void {
@@ -391,6 +425,7 @@ class QueryClient {
         console.warn('[query] observer threw', err);
       }
     }
+    this.notifyGlobal();
   }
 }
 

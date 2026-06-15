@@ -1,7 +1,7 @@
 import { appNavigation, navParam } from '../data/navigation';
 import { api } from '../data/api';
 import { workspaceStore } from '../data/workspace';
-import { useQuery, QueryHandle, FetchContext } from '../queries/cache';
+import { useQuery, QueryHandle, FetchContext, queryClient } from '../queries/cache';
 import { ChatSession } from '../models/types';
 import { THEME, ColorScheme, SPACE, space, themeTokens } from '../lib/theme';
 import { timeAgo } from '../lib/utils';
@@ -14,7 +14,12 @@ import { Skeleton } from '../components/ui/Skeleton';
 export struct ChatPage {
   @Local scheme: ColorScheme = 'light';
   @Local version: number = 0;
+  // H-1 fix: @Local mirrors of the cache state. See InboxPage.ets.
+  @Local _isLoading: boolean = true;
+  @Local _data: ChatSession[] | undefined = undefined;
+  @Local _error: Error | null = null;
   private query: QueryHandle<ChatSession[]> | null = null;
+  private globalUnsub?: () => void;
 
   aboutToAppear(): void {
     this.scheme = this.detectScheme();
@@ -22,37 +27,38 @@ export struct ChatPage {
     this.query = useQuery<ChatSession[]>(
       ['chat-sessions', wsId],
       (ctx: FetchContext) => api.listChatSessions({ cancelToken: ctx.cancelToken }),
-      { staleTimeMs: 30_000, onUpdate: () => { this.version++; } }
+      { staleTimeMs: 30_000, onUpdate: () => { this.version++; this.syncFromCache(); } }
     );
+    this.globalUnsub = queryClient.onAnyStateChange(() => { this.syncFromCache(); });
+    this.syncFromCache();
   }
 
   aboutToDisappear(): void {
     this.query?.unsubscribe();
+    this.globalUnsub?.();
   }
 
   private detectScheme(): ColorScheme {
     return 'light';
   }
 
-  private queryState() {
-    return this.query ? this.query.getState() : null;
+  private syncFromCache(): void {
+    if (!this.query) return;
+    const s = this.query.getState();
+    this._isLoading = s.isLoading;
+    this._data = s.data as ChatSession[] | undefined;
+    this._error = s.error;
   }
 
   private chatSessions(): ChatSession[] {
-    return this.queryState()?.data ?? [];
-  }
-
-  private isLoading(): boolean {
-    return this.queryState()?.isLoading === true;
+    return this._data ?? [];
   }
 
   build() {
     Column() {
       Header({ title: 'Chat', scheme: this.scheme })
 
-      if (!this.queryState()) {
-        Blank().layoutWeight(1)
-      } else if (this.isLoading()) {
+      if (this._isLoading) {
         Column() {
           ForEach([1, 2, 3, 4], () => {
             Row() {
@@ -69,6 +75,14 @@ export struct ChatPage {
             .padding(space('4'))
           })
         }
+      } else if (this._error) {
+        MulticaText({
+          value: `Failed to load chats: ${this._error.message}`,
+          scheme: this.scheme,
+          textSize: 'sm',
+          color: 'destructive'
+        })
+          .padding(space('4'))
       } else if (this.chatSessions().length === 0) {
         Stack({ alignContent: Alignment.Center }) {
           MulticaText({

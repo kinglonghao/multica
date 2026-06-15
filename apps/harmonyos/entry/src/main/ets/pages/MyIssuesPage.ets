@@ -1,5 +1,6 @@
 import { appNavigation, navParam } from '../data/navigation';
 import { useIssueListQuery, QueryHandle } from '../queries/issue';
+import { queryClient } from '../queries/cache';
 import { THEME, ColorScheme, SPACE, space, themeTokens } from '../lib/theme';
 import { MulticaText } from '../components/ui/Text';
 import { Header } from '../components/ui/Header';
@@ -11,27 +12,44 @@ import { Issue, ListIssuesResponse } from '../models/types';
 export struct MyIssuesPage {
   @Local scheme: ColorScheme = 'light';
   @Local version: number = 0;
+  // H-1 fix: @Local mirrors of the cache state. ArkUI only tracks
+  // @Local fields that build() actually reads — see InboxPage.ets
+  // for the long-form rationale.
+  @Local _isLoading: boolean = true;
+  @Local _data: ListIssuesResponse | undefined = undefined;
+  @Local _error: Error | null = null;
   private query: QueryHandle<ListIssuesResponse> | null = null;
+  private globalUnsub?: () => void;
 
   aboutToAppear(): void {
     this.scheme = this.detectScheme();
-    this.query = useIssueListQuery({ status: ['todo', 'in_progress', 'in_review'] }, () => { this.version++; });
+    this.query = useIssueListQuery({ status: ['todo', 'in_progress', 'in_review'] }, () => {
+      this.version++;
+      this.syncFromCache();
+    });
+    this.globalUnsub = queryClient.onAnyStateChange(() => { this.syncFromCache(); });
+    this.syncFromCache();
   }
 
   aboutToDisappear(): void {
     this.query?.unsubscribe();
+    this.globalUnsub?.();
   }
 
   private detectScheme(): ColorScheme {
     return 'light';
   }
 
-  private queryState() {
-    return this.query ? this.query.getState() : null;
+  private syncFromCache(): void {
+    if (!this.query) return;
+    const s = this.query.getState();
+    this._isLoading = s.isLoading;
+    this._data = s.data as ListIssuesResponse | undefined;
+    this._error = s.error;
   }
 
-  private issueItems() {
-    return this.queryState()?.data?.issues ?? [];
+  private issueItems(): Issue[] {
+    return this._data?.issues ?? [];
   }
 
   build() {
@@ -46,9 +64,7 @@ export struct MyIssuesPage {
   }
 
   @Builder private Body() {
-    if (!this.queryState()) {
-      Blank().layoutWeight(1)
-    } else if (this.queryState()!.isLoading) {
+    if (this._isLoading) {
       Column() {
         ForEach([1, 2, 3, 4, 5], () => {
           Row() {
@@ -59,9 +75,9 @@ export struct MyIssuesPage {
       }
       .layoutWeight(1)
       .width('100%')
-    } else if (this.queryState()!.error) {
+    } else if (this._error) {
       MulticaText({
-        value: `Failed to load issues: ${this.queryState()!.error!.message}`,
+        value: `Failed to load issues: ${this._error.message}`,
         scheme: this.scheme,
         textSize: 'sm',
         color: 'destructive'

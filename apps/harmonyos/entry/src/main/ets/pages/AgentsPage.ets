@@ -1,6 +1,6 @@
 import { workspaceStore } from '../data/workspace';
 import { api } from '../data/api';
-import { useQuery, QueryHandle, FetchContext } from '../queries/cache';
+import { useQuery, QueryHandle, FetchContext, queryClient } from '../queries/cache';
 import { Agent } from '../models/types';
 import { THEME, ColorScheme, SPACE, RADIUS, space, themeTokens } from '../lib/theme';
 import { MulticaText } from '../components/ui/Text';
@@ -12,7 +12,12 @@ import { Skeleton } from '../components/ui/Skeleton';
 export struct AgentsPage {
   @Local scheme: ColorScheme = 'light';
   @Local version: number = 0;
+  // H-1 fix: @Local mirrors. See InboxPage.ets.
+  @Local _isLoading: boolean = true;
+  @Local _data: Agent[] | undefined = undefined;
+  @Local _error: Error | null = null;
   private query: QueryHandle<Agent[]> | null = null;
+  private globalUnsub?: () => void;
 
   aboutToAppear(): void {
     this.scheme = this.detectScheme();
@@ -20,29 +25,34 @@ export struct AgentsPage {
     this.query = useQuery<Agent[]>(
       ['agents', wsId],
       (ctx: FetchContext) => api.listAgents({ cancelToken: ctx.cancelToken }),
-      { staleTimeMs: 60_000, onUpdate: () => { this.version++; } }
+      { staleTimeMs: 60_000, onUpdate: () => { this.version++; this.syncFromCache(); } }
     );
+    this.globalUnsub = queryClient.onAnyStateChange(() => { this.syncFromCache(); });
+    this.syncFromCache();
   }
 
   aboutToDisappear(): void {
     this.query?.unsubscribe();
+    this.globalUnsub?.();
   }
 
   private detectScheme(): ColorScheme {
     return 'light';
   }
 
-  private queryState() {
-    return this.query ? this.query.getState() : null;
+  private syncFromCache(): void {
+    if (!this.query) return;
+    const s = this.query.getState();
+    this._isLoading = s.isLoading;
+    this._data = s.data as Agent[] | undefined;
+    this._error = s.error;
   }
 
   build() {
     Column() {
       Header({ title: 'Agents', scheme: this.scheme })
 
-      if (!this.queryState()) {
-        Blank().layoutWeight(1)
-      } else if (this.queryState()!.isLoading) {
+      if (this._isLoading) {
         Column() {
           ForEach([1, 2, 3], () => {
             Row() {
@@ -59,9 +69,9 @@ export struct AgentsPage {
             .padding(space('4'))
           })
         }
-      } else if (this.queryState()!.error) {
+      } else if (this._error) {
         MulticaText({
-          value: `Failed to load agents: ${this.queryState()!.error!.message}`,
+          value: `Failed to load agents: ${this._error.message}`,
           scheme: this.scheme,
           textSize: 'sm',
           color: 'destructive'
@@ -69,7 +79,7 @@ export struct AgentsPage {
           .padding(space('4'))
       } else {
         List({ space: 0 }) {
-          ForEach(this.queryState()!.data ?? [], (agent: Agent) => {
+          ForEach(this._data ?? [], (agent: Agent) => {
             ListItem() {
               Row() {
                 Avatar({ name: agent.name, url: agent.avatar_url ?? '', avatarSize: 40, scheme: this.scheme })

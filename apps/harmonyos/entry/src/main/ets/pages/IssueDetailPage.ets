@@ -35,18 +35,32 @@ export struct IssueDetailPage {
   @Local editingCommentId: string = '';
   @Local editingDraft: string = '';
   @Local savingEdit: boolean = false;
+  // H-1 fix: @Local mirrors so build() can read them and ArkUI
+  // will re-render when the cache settles. See InboxPage.ets.
+  @Local _issueIsLoading: boolean = true;
+  @Local _issue: Issue | undefined = undefined;
+  @Local _issueError: Error | null = null;
+  @Local _commentsIsLoading: boolean = true;
+  @Local _comments: Comment[] | undefined = undefined;
+  @Local _commentsError: Error | null = null;
   private query: QueryHandle<Issue> | null = null;
   private comments: QH<Comment[]> | null = null;
   private wsUnsub?: () => void;
+  private globalUnsub?: () => void;
 
   aboutToAppear(): void {
     this.scheme = this.detectScheme();
-    this.query = useIssueDetailQuery(this.issueId, () => { this.version++; });
+    this.query = useIssueDetailQuery(this.issueId, () => {
+      this.version++;
+      this.syncFromCache();
+    });
     this.comments = useQuery<Comment[]>(
       COMMENTS_KEY(this.issueId),
       (ctx: FetchContext) => api.listComments(this.issueId, { cancelToken: ctx.cancelToken }),
-      { staleTimeMs: 10_000, onUpdate: () => { this.version++; } }
+      { staleTimeMs: 10_000, onUpdate: () => { this.version++; this.syncFromCache(); } }
     );
+    this.globalUnsub = queryClient.onAnyStateChange(() => { this.syncFromCache(); });
+    this.syncFromCache();
     // Subscribe to issue:updated events for this specific issue.
     // The hook also patches the cache for us on each update.
     this.wsUnsub = useIssueRealtime(this.issueId);
@@ -56,10 +70,26 @@ export struct IssueDetailPage {
     this.query?.unsubscribe();
     this.comments?.unsubscribe();
     this.wsUnsub?.();
+    this.globalUnsub?.();
   }
 
   private detectScheme(): ColorScheme {
     return 'light';
+  }
+
+  private syncFromCache(): void {
+    if (this.query) {
+      const s = this.query.getState();
+      this._issueIsLoading = s.isLoading;
+      this._issue = s.data as Issue | undefined;
+      this._issueError = s.error;
+    }
+    if (this.comments) {
+      const s = this.comments.getState();
+      this._commentsIsLoading = s.isLoading;
+      this._comments = s.data as Comment[] | undefined;
+      this._commentsError = s.error;
+    }
   }
 
   private async submitComment(): Promise<void> {
@@ -157,24 +187,22 @@ export struct IssueDetailPage {
   }
 
   @Builder Body() {
-    if (!this.issueState()) {
-      Skeleton({ scheme: this.scheme, skeletonWidth: 80, skeletonHeight: 12, radius: 4 })
-    } else {
+    if (this._issueIsLoading) {
+      this.Loading()
+    } else if (this._issueError) {
+      this.ErrorState(this._issueError.message)
+    } else if (this._issue) {
       Scroll() {
         Column() {
-          if (this.issueState()!.isLoading) {
-            this.Loading()
-          } else if (this.issueState()!.error) {
-            this.ErrorState(this.issueState()!.error!.message)
-          } else if (this.issueState()!.data) {
-            this.IssueHeader(this.issueState()!.data!)
-            this.Timeline()
-            this.Composer()
-          }
+          this.IssueHeader(this._issue!)
+          this.Timeline()
+          this.Composer()
         }
       }
       .layoutWeight(1)
       .width('100%')
+    } else {
+      Skeleton({ scheme: this.scheme, skeletonWidth: 80, skeletonHeight: 12, radius: 4 })
     }
   }
 
@@ -255,32 +283,34 @@ export struct IssueDetailPage {
   }
 
   @Builder Timeline() {
-    if (!this.commentsState()) {
-      Blank().width('100%')
-    } else {
+    if (this._commentsIsLoading) {
       Column() {
-        if (this.commentsState()!.isLoading) {
-          ForEach([1, 2, 3], () => {
-            Skeleton({ scheme: this.scheme, skeletonWidth: '100%', skeletonHeight: 56, radius: 8 })
-              .margin({ top: space('2') })
-          })
-        } else if (this.commentsState()!.data && this.commentsState()!.data!.length > 0) {
-          ForEach(this.commentsState()!.data!, (c: Comment) => {
-            this.CommentRow(c)
-          })
-        } else {
-          MulticaText({
-            value: 'No activity yet. Be the first to comment.',
-            scheme: this.scheme,
-            textSize: 'sm',
-            color: 'mutedForeground'
-          })
-            .width('100%')
-        }
+        ForEach([1, 2, 3], () => {
+          Skeleton({ scheme: this.scheme, skeletonWidth: '100%', skeletonHeight: 56, radius: 8 })
+            .margin({ top: space('2') })
+        })
       }
       .width('100%')
       .padding({ left: space('4'), right: space('4') })
       .alignItems(HorizontalAlign.Start)
+    } else if (this._comments && this._comments!.length > 0) {
+      Column() {
+        ForEach(this._comments!, (c: Comment) => {
+          this.CommentRow(c)
+        })
+      }
+      .width('100%')
+      .padding({ left: space('4'), right: space('4') })
+      .alignItems(HorizontalAlign.Start)
+    } else {
+      MulticaText({
+        value: 'No activity yet. Be the first to comment.',
+        scheme: this.scheme,
+        textSize: 'sm',
+        color: 'mutedForeground'
+      })
+        .width('100%')
+        .padding({ left: space('4'), right: space('4') })
     }
   }
 

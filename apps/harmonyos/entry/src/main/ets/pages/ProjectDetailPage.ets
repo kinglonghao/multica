@@ -1,6 +1,6 @@
 import { appNavigation, navParam } from '../data/navigation';
 import { useProjectDetailQuery } from '../queries/project';
-import { QueryHandle } from '../queries/cache';
+import { QueryHandle, queryClient } from '../queries/cache';
 import { useIssueListQuery } from '../queries/issue';
 import { useProjectRealtime } from '../realtime/realtime-hooks';
 import { THEME, ColorScheme, SPACE, RADIUS, space, themeTokens } from '../lib/theme';
@@ -21,14 +21,24 @@ export struct ProjectDetailPage {
   @Param projectId: string = '';
   @Local scheme: ColorScheme = 'light';
   @Local version: number = 0;
+  // H-1 fix: @Local mirrors. See InboxPage.ets.
+  @Local _projectIsLoading: boolean = true;
+  @Local _project: Project | undefined = undefined;
+  @Local _projectError: Error | null = null;
+  @Local _issuesIsLoading: boolean = true;
+  @Local _issues: ListIssuesResponse | undefined = undefined;
+  @Local _issuesError: Error | null = null;
   private project: QueryHandle<Project> | null = null;
   private issues: QueryHandle<ListIssuesResponse> | null = null;
   private wsUnsub?: () => void;
+  private globalUnsub?: () => void;
 
   aboutToAppear(): void {
     this.scheme = this.detectScheme();
-    this.project = useProjectDetailQuery(this.projectId, () => { this.version++; });
-    this.issues = useIssueListQuery({ project_id: this.projectId }, () => { this.version++; });
+    this.project = useProjectDetailQuery(this.projectId, () => { this.version++; this.syncFromCache(); });
+    this.issues = useIssueListQuery({ project_id: this.projectId }, () => { this.version++; this.syncFromCache(); });
+    this.globalUnsub = queryClient.onAnyStateChange(() => { this.syncFromCache(); });
+    this.syncFromCache();
     this.wsUnsub = useProjectRealtime(this.projectId);
   }
 
@@ -36,22 +46,26 @@ export struct ProjectDetailPage {
     this.project?.unsubscribe();
     this.issues?.unsubscribe();
     this.wsUnsub?.();
+    this.globalUnsub?.();
   }
 
   private detectScheme(): ColorScheme {
     return 'light';
   }
 
-  private projectState() {
-    return this.project ? this.project.getState() : null;
-  }
-
-  private issuesState() {
-    return this.issues ? this.issues.getState() : null;
-  }
-
-  private projectData() {
-    return this.projectState()?.data;
+  private syncFromCache(): void {
+    if (this.project) {
+      const s = this.project.getState();
+      this._projectIsLoading = s.isLoading;
+      this._project = s.data as Project | undefined;
+      this._projectError = s.error;
+    }
+    if (this.issues) {
+      const s = this.issues.getState();
+      this._issuesIsLoading = s.isLoading;
+      this._issues = s.data as ListIssuesResponse | undefined;
+      this._issuesError = s.error;
+    }
   }
 
   build() {
@@ -88,104 +102,108 @@ export struct ProjectDetailPage {
   }
 
   @Builder Body() {
-    if (!this.projectState() || !this.issuesState()) {
+    if (this._projectIsLoading) {
       Column() {
         Skeleton({ scheme: this.scheme, skeletonWidth: '90%', skeletonHeight: 28, radius: 6 })
       }
       .padding(space('4'))
       .width('100%')
       .alignItems(HorizontalAlign.Start)
-    } else {
+    } else if (this._projectError) {
+      MulticaText({
+        value: `Failed to load project: ${this._projectError.message}`,
+        scheme: this.scheme,
+        textSize: 'sm',
+        color: 'destructive'
+      })
+        .padding(space('4'))
+    } else if (this._project) {
       Scroll() {
         Column() {
-          if (this.projectState()!.isLoading) {
-            Skeleton({ scheme: this.scheme, skeletonWidth: '90%', skeletonHeight: 28, radius: 6 })
-          } else if (this.projectData()) {
-            Stack({ alignContent: Alignment.Center }) {
-              MulticaText({
-                value: this.projectData()!.identifier,
-                scheme: this.scheme,
-                textSize: 'lg',
-                weight: 'bold',
-                color: 'brandForeground'
-              })
-            }
-            .width(56)
-            .height(56)
-            .borderRadius(RADIUS.lg)
-            .backgroundColor(String(themeTokens(this.scheme).brand))
-
+          Stack({ alignContent: Alignment.Center }) {
             MulticaText({
-              value: this.projectData()!.name,
+              value: this._project!.identifier,
               scheme: this.scheme,
-              textSize: 'xl',
+              textSize: 'lg',
               weight: 'bold',
-              color: 'foreground'
+              color: 'brandForeground'
             })
-              .margin({ top: space('3') })
+          }
+          .width(56)
+          .height(56)
+          .borderRadius(RADIUS.lg)
+          .backgroundColor(String(themeTokens(this.scheme).brand))
 
-            Row() {
-              Row() {
-                ProjectStatusIcon({ status: this.projectData()!.status, scheme: this.scheme, iconSize: 12 })
-                MulticaText({
-                  value: projectStatusLabel(this.projectData()!.status),
-                  scheme: this.scheme,
-                  textSize: 'xs',
-                  color: 'foreground',
-                  weight: 'medium'
-                })
-                  .margin({ left: space('1.5') })
-              }
-              .padding({ left: space('2.5'), right: space('2.5'), top: space('1.5'), bottom: space('1.5') })
-              .backgroundColor(String(themeTokens(this.scheme).card))
-              .borderRadius(RADIUS.full)
-              .margin({ right: space('2') })
-
-              Row() {
-                ProjectPriorityIcon({ priority: this.projectData()!.priority, scheme: this.scheme, iconSize: 12 })
-                MulticaText({
-                  value: projectPriorityLabel(this.projectData()!.priority),
-                  scheme: this.scheme,
-                  textSize: 'xs',
-                  color: 'foreground',
-                  weight: 'medium'
-                })
-                  .margin({ left: space('1.5') })
-              }
-              .padding({ left: space('2.5'), right: space('2.5'), top: space('1.5'), bottom: space('1.5') })
-              .backgroundColor(String(themeTokens(this.scheme).card))
-              .borderRadius(RADIUS.full)
-            }
+          MulticaText({
+            value: this._project!.name,
+            scheme: this.scheme,
+            textSize: 'xl',
+            weight: 'bold',
+            color: 'foreground'
+          })
             .margin({ top: space('3') })
 
-            if (this.projectData()!.description) {
-              Column() {
-                Card({ scheme: this.scheme, contentPadding: space('4') }) {
-                  MulticaText({
-                    value: this.projectData()!.description!,
-                    scheme: this.scheme,
-                    textSize: 'base',
-                    color: 'foreground'
-                  })
-                }
-              }
-              .margin({ top: space('4') })
-              .width('100%')
+          Row() {
+            Row() {
+              ProjectStatusIcon({ status: this._project!.status, scheme: this.scheme, iconSize: 12 })
+              MulticaText({
+                value: projectStatusLabel(this._project!.status),
+                scheme: this.scheme,
+                textSize: 'xs',
+                color: 'foreground',
+                weight: 'medium'
+              })
+                .margin({ left: space('1.5') })
             }
+            .padding({ left: space('2.5'), right: space('2.5'), top: space('1.5'), bottom: space('1.5') })
+            .backgroundColor(String(themeTokens(this.scheme).card))
+            .borderRadius(RADIUS.full)
+            .margin({ right: space('2') })
 
-            if (this.projectData()!.lead_name) {
-              Row() {
-                Avatar({ name: this.projectData()!.lead_name!, url: this.projectData()!.lead_avatar_url ?? '', avatarSize: 32, scheme: this.scheme })
+            Row() {
+              ProjectPriorityIcon({ priority: this._project!.priority, scheme: this.scheme, iconSize: 12 })
+              MulticaText({
+                value: projectPriorityLabel(this._project!.priority),
+                scheme: this.scheme,
+                textSize: 'xs',
+                color: 'foreground',
+                weight: 'medium'
+              })
+                .margin({ left: space('1.5') })
+            }
+            .padding({ left: space('2.5'), right: space('2.5'), top: space('1.5'), bottom: space('1.5') })
+            .backgroundColor(String(themeTokens(this.scheme).card))
+            .borderRadius(RADIUS.full)
+          }
+          .margin({ top: space('3') })
+
+          if (this._project!.description) {
+            Column() {
+              Card({ scheme: this.scheme, contentPadding: space('4') }) {
                 MulticaText({
-                  value: `Lead: ${this.projectData()!.lead_name!}`,
+                  value: this._project!.description!,
                   scheme: this.scheme,
-                  textSize: 'sm',
+                  textSize: 'base',
                   color: 'foreground'
                 })
-                  .margin({ left: space('2') })
               }
-              .margin({ top: space('3') })
             }
+            .margin({ top: space('4') })
+            .width('100%')
+          }
+
+          if (this._project!.lead_name) {
+            Row() {
+              Avatar({ name: this._project!.lead_name!, url: this._project!.lead_avatar_url ?? '', avatarSize: 32, scheme: this.scheme })
+              MulticaText({
+                value: `Lead: ${this._project!.lead_name!}`,
+                scheme: this.scheme,
+                textSize: 'sm',
+                color: 'foreground'
+              })
+                .margin({ left: space('2') })
+            }
+            .margin({ top: space('3') })
           }
 
           MulticaText({
@@ -199,9 +217,22 @@ export struct ProjectDetailPage {
             .width('100%')
             .padding({ left: space('4'), right: space('4') })
 
-          if (this.issuesState()!.data?.issues) {
+          if (this._issuesIsLoading) {
+            ForEach([1, 2, 3], () => {
+              Skeleton({ scheme: this.scheme, skeletonWidth: '90%', skeletonHeight: 56, radius: 8 })
+                .margin({ top: space('2'), left: space('4'), right: space('4') })
+            })
+          } else if (this._issuesError) {
+            MulticaText({
+              value: `Failed to load issues: ${this._issuesError.message}`,
+              scheme: this.scheme,
+              textSize: 'sm',
+              color: 'destructive'
+            })
+              .padding({ left: space('4'), right: space('4') })
+          } else if (this._issues?.issues) {
             Column() {
-              ForEach(this.issuesState()!.data!.issues, (issue: Issue) => {
+              ForEach(this._issues!.issues, (issue: Issue) => {
                 IssueRow({
                   issue: issue,
                   scheme: this.scheme,

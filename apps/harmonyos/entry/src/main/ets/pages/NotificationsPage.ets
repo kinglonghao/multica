@@ -1,6 +1,6 @@
 import { appNavigation } from '../data/navigation';
 import { api } from '../data/api';
-import { useQuery, QueryHandle, FetchContext } from '../queries/cache';
+import { useQuery, QueryHandle, FetchContext, queryClient } from '../queries/cache';
 import { NotificationPreferences, NotificationPreference } from '../models/types';
 import { THEME, ColorScheme, SPACE, RADIUS, space, themeTokens } from '../lib/theme';
 import { MulticaText } from '../components/ui/Text';
@@ -19,6 +19,10 @@ export struct NotificationsPage {
   @Local errorMessage: string = '';
   @Local success: boolean = false;
   @Local version: number = 0;
+  // H-1 fix: @Local mirrors. See InboxPage.ets.
+  @Local _isLoading: boolean = true;
+  @Local _data: NotificationPreferences | undefined = undefined;
+  @Local _error: Error | null = null;
   /** Immutable snapshot of the prefs list. Each toggle creates a new
    *  array via `setPref(prefs, index, next)` rather than mutating
    *  in place — fixes H-3 (the v0.2 code did `pref.enabled = isOn`
@@ -27,6 +31,7 @@ export struct NotificationsPage {
    *  preserved). */
   @Local prefs: NotificationPreference[] = [];
   private query: QueryHandle<NotificationPreferences> | null = null;
+  private globalUnsub?: () => void;
 
   aboutToAppear(): void {
     this.scheme = this.detectScheme();
@@ -37,17 +42,26 @@ export struct NotificationsPage {
         staleTimeMs: PREFS_STALE_MS,
         onUpdate: () => {
           this.version++;
-          // Mirror the cache into local @Local state so the toggle
-          // mutations below can build a new array off of it.
-          const s = this.query?.getState();
-          if (s?.data) this.prefs = [...s.data.preferences];
+          this.syncFromCache();
         }
       }
     );
+    this.globalUnsub = queryClient.onAnyStateChange(() => { this.syncFromCache(); });
+    this.syncFromCache();
   }
 
   aboutToDisappear(): void {
     this.query?.unsubscribe();
+    this.globalUnsub?.();
+  }
+
+  private syncFromCache(): void {
+    if (!this.query) return;
+    const s = this.query.getState();
+    this._isLoading = s.isLoading;
+    this._data = s.data as NotificationPreferences | undefined;
+    this._error = s.error;
+    if (s.data) this.prefs = [...s.data.preferences];
   }
 
   private detectScheme(): ColorScheme {
@@ -109,9 +123,7 @@ export struct NotificationsPage {
         right: this.SaveButton()
       })
 
-      if (!this.queryState()) {
-        Blank().layoutWeight(1)
-      } else if (this.queryState()!.isLoading) {
+      if (this._isLoading) {
         Column() {
           ForEach([1, 2, 3, 4], () => {
             Skeleton({ scheme: this.scheme, skeletonWidth: '90%', skeletonHeight: 56, radius: 8 })
@@ -119,6 +131,14 @@ export struct NotificationsPage {
           })
         }
         .padding(space('4'))
+      } else if (this._error) {
+        MulticaText({
+          value: `Failed to load notification preferences: ${this._error.message}`,
+          scheme: this.scheme,
+          textSize: 'sm',
+          color: 'destructive'
+        })
+          .padding(space('4'))
       } else {
         Column() {
           // Render from this.prefs (immutable snapshot), not the cache
