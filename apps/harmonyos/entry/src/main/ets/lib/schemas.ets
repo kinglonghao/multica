@@ -49,6 +49,7 @@
  */
 
 import {
+  Agent,
   AgentTask,
   ChatMessage,
   Comment,
@@ -510,6 +511,74 @@ class InboxListSchemaImpl implements Schema<InboxItem[]> {
 }
 
 export const InboxListSchema: Schema<InboxItem[]> = new InboxListSchemaImpl();
+
+// ---------- Agent ----------
+
+export const EMPTY_AGENT: Agent = {
+  id: '',
+  workspace_id: '',
+  name: '',
+  description: null,
+  avatar_url: null,
+  status: 'offline',
+  runtime_mode: 'cloud',
+  visibility: 'workspace',
+  created_at: '',
+  updated_at: ''
+};
+
+export const EMPTY_AGENT_LIST: Agent[] = [];
+
+class AgentSchemaImpl implements Schema<Agent> {
+  validate(value: JsonValue): ParseResult<Agent> {
+    if (!isObject(value)) return fail('Agent: not an object');
+    const id = readRequiredId(value);
+    if (id === null) return fail('Agent.id missing or not a string');
+    const name = readString(value, 'name', '').trim();
+    if (name.length === 0) return fail('Agent.name missing or empty');
+    const data: Agent = {
+      id,
+      workspace_id: readString(value, 'workspace_id', ''),
+      name,
+      description: readNullableString(value, 'description'),
+      avatar_url: readNullableString(value, 'avatar_url'),
+      status: readString(value, 'status', 'offline'),
+      runtime_mode: readString(value, 'runtime_mode', 'cloud'),
+      visibility: readString(value, 'visibility', 'workspace'),
+      created_at: readString(value, 'created_at', ''),
+      updated_at: readString(value, 'updated_at', '')
+    };
+    return ok(data);
+  }
+}
+
+export const AgentSchema: Schema<Agent> = new AgentSchemaImpl();
+
+class AgentListSchemaImpl implements Schema<Agent[]> {
+  validate(value: JsonValue): ParseResult<Agent[]> {
+    if (!Array.isArray(value)) return fail('AgentList: not an array');
+    const arr = value as Object[];
+    const out: Agent[] = [];
+    const dropped: string[] = [];
+    for (let i = 0; i < arr.length; i++) {
+      const r = AgentSchema.validate(arr[i] as JsonValue);
+      if (r.success) {
+        out.push(r.data);
+      } else {
+        dropped.push((r as ParseFailure).error);
+      }
+    }
+    if (dropped.length > 0) {
+      console.warn(
+        `[api] AgentList: ${dropped.length} item(s) failed validation; dropping the bad rows`,
+        dropped
+      );
+    }
+    return ok(out);
+  }
+}
+
+export const AgentListSchema: Schema<Agent[]> = new AgentListSchemaImpl();
 
 // ---------- AgentTask ----------
 

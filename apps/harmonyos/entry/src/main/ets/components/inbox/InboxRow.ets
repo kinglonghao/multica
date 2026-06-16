@@ -1,5 +1,5 @@
 import { InboxItem } from '../../models/types';
-import { ColorScheme, THEME, SPACE, space, themeTokens } from '../../lib/theme';
+import { ColorScheme, space, themeTokens } from '../../lib/theme';
 import { timeAgo } from '../../lib/utils';
 import { MulticaText } from '../ui/Text';
 import { Avatar } from '../ui/Avatar';
@@ -15,6 +15,17 @@ export struct InboxRow {
 
   build() {
     Row() {
+      if (!this.item.read) {
+        Stack()
+          .width(6)
+          .height(6)
+          .borderRadius(3)
+          .backgroundColor(String(themeTokens(this.scheme).brand))
+          .margin({ top: 6, right: space('2') })
+      } else {
+        Blank().width(6).margin({ right: space('2') })
+      }
+
       Stack({ alignContent: Alignment.Center }) {
         if (this.item.actor_avatar_url) {
           Image(this.item.actor_avatar_url)
@@ -26,8 +37,8 @@ export struct InboxRow {
           Avatar({ name: this.item.actor_name ?? '·', avatarSize: 36, scheme: this.scheme })
         }
       }
-      .width(40)
-      .height(40)
+      .width(36)
+      .height(36)
 
       Column() {
         Row() {
@@ -36,8 +47,8 @@ export struct InboxRow {
             scheme: this.scheme,
             textSize: 'sm',
             weight: this.item.read ? 'normal' : 'medium',
-            color: 'foreground',
-            maxLines: 2,
+            color: this.item.read ? 'mutedForeground' : 'foreground',
+            maxLines: 1,
             overflow: 'ellipsis'
           })
             .layoutWeight(1)
@@ -73,15 +84,6 @@ export struct InboxRow {
       .layoutWeight(1)
       .margin({ left: space('3') })
       .alignItems(HorizontalAlign.Start)
-
-      if (!this.item.read) {
-        Stack()
-          .width(8)
-          .height(8)
-          .borderRadius(4)
-          .backgroundColor(String(themeTokens(this.scheme).brand))
-          .margin({ left: space('2') })
-      }
     }
     .width('100%')
     .padding({
@@ -90,7 +92,11 @@ export struct InboxRow {
       top: space('3'),
       bottom: space('3')
     })
-    .backgroundColor(this.item.read ? 'transparent' : String(themeTokens(this.scheme).card))
+    .backgroundColor(String(themeTokens(this.scheme).background))
+    .border({
+      width: { bottom: 1 },
+      color: String(themeTokens(this.scheme).border)
+    })
     .onClick(() => { this.onPress(); })
   }
 

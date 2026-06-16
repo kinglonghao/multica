@@ -4,6 +4,7 @@ import { QueryHandle, queryClient } from '../queries/cache';
 import { useIssueListQuery } from '../queries/issue';
 import { useProjectRealtime } from '../realtime/realtime-hooks';
 import { THEME, ColorScheme, SPACE, RADIUS, space, themeTokens } from '../lib/theme';
+import { detectSystemColorScheme } from '../lib/theme-manager';
 import { timeAgo } from '../lib/utils';
 import { projectStatusLabel, projectPriorityLabel } from '../lib/project-status';
 import { MulticaText } from '../components/ui/Text';
@@ -49,8 +50,8 @@ export struct ProjectDetailPage {
     this.globalUnsub?.();
   }
 
-  private detectScheme(): ColorScheme {
-    return 'light';
+    private detectScheme(): ColorScheme {
+    return detectSystemColorScheme();
   }
 
   private syncFromCache(): void {
@@ -73,7 +74,7 @@ export struct ProjectDetailPage {
       Header({
         title: 'Project',
         scheme: this.scheme,
-        left: this.BackButton()
+        left: this.BackButton
       })
       if (!this.projectId) {
         MulticaText({

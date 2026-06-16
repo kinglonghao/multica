@@ -1,13 +1,13 @@
 import { appNavigation } from '../data/navigation';
 import { api } from '../data/api';
+import { authStore } from '../data/auth';
 import { useQuery, QueryHandle, FetchContext, queryClient } from '../queries/cache';
 import { useChatRealtime } from '../realtime/realtime-hooks';
 import { ChatMessage, ChatSession } from '../models/types';
-import { THEME, ColorScheme, SPACE, RADIUS, space, themeTokens } from '../lib/theme';
+import { ColorScheme, RADIUS, space, themeTokens } from '../lib/theme';
+import { detectSystemColorScheme } from '../lib/theme-manager';
 import { timeAgo } from '../lib/utils';
 import { MulticaText } from '../components/ui/Text';
-import { Header } from '../components/ui/Header';
-import { IconButton } from '../components/ui/IconButton';
 import { Avatar } from '../components/ui/Avatar';
 import { Skeleton } from '../components/ui/Skeleton';
 
@@ -19,7 +19,6 @@ export struct ChatDetailPage {
   @Local inputDraft: string = '';
   @Local sending: boolean = false;
   @Local sendError: string = '';
-  // H-1 fix: @Local mirrors. See InboxPage.ets.
   @Local _session: ChatSession | undefined = undefined;
   @Local _sessionIsLoading: boolean = true;
   @Local _sessionError: Error | null = null;
@@ -30,6 +29,11 @@ export struct ChatDetailPage {
   private messages: QueryHandle<ChatMessage[]> | null = null;
   private wsUnsub?: () => void;
   private globalUnsub?: () => void;
+
+  private currentUserName(): string {
+    const user = authStore.getState().user;
+    return user?.display_name ?? user?.email ?? 'Me';
+  }
 
   aboutToAppear(): void {
     this.scheme = this.detectScheme();
@@ -45,9 +49,6 @@ export struct ChatDetailPage {
     );
     this.globalUnsub = queryClient.onAnyStateChange(() => { this.syncFromCache(); });
     this.syncFromCache();
-    // Subscribe to chat:message events for this session. The
-    // hook patches the cache in place — incoming assistant
-    // messages stream in without a refetch.
     this.wsUnsub = useChatRealtime(this.chatId);
   }
 
@@ -58,8 +59,8 @@ export struct ChatDetailPage {
     this.globalUnsub?.();
   }
 
-  private detectScheme(): ColorScheme {
-    return 'light';
+    private detectScheme(): ColorScheme {
+    return detectSystemColorScheme();
   }
 
   private syncFromCache(): void {
@@ -77,6 +78,20 @@ export struct ChatDetailPage {
     }
   }
 
+  private sessionTitle(): string {
+    const agentName = this._session?.agent_name?.trim() ?? '';
+    if (agentName) return agentName;
+    const title = this._session?.title?.trim() ?? '';
+    if (title) return title;
+    return 'Chat';
+  }
+
+  private sessionSubtitle(): string {
+    const title = this._session?.title?.trim() ?? '';
+    if (title) return title;
+    return 'New chat';
+  }
+
   private async send(): Promise<void> {
     const text = this.inputDraft.trim();
     if (!text || this.sending) return;
@@ -85,9 +100,6 @@ export struct ChatDetailPage {
     try {
       await api.sendChatMessage(this.chatId, text);
       this.inputDraft = '';
-      // Refetch on send so the user's message + the agent's
-      // eventual response both land; the WS hook handles the
-      // interim assistant message.
       this.messages?.refetch();
     } catch (err) {
       this.sendError = err instanceof Error ? err.message : 'Failed to send message';
@@ -98,18 +110,13 @@ export struct ChatDetailPage {
 
   build() {
     Column() {
-      Header({
-        title: this._session?.title ?? 'Chat',
-        scheme: this.scheme,
-        left: this.BackButton()
-      })
+      this.PageHeader()
 
       if (this._messagesIsLoading) {
         Scroll() {
           Column() {
             ForEach([1, 2, 3], () => {
-              Skeleton({ scheme: this.scheme, skeletonWidth: '90%', skeletonHeight: 40, radius: 8 })
-                .margin({ top: space('2'), left: space('4'), right: space('4') })
+              this.MessageSkeleton()
             })
           }
           .width('100%')
@@ -118,22 +125,28 @@ export struct ChatDetailPage {
         .layoutWeight(1)
         .width('100%')
       } else if (this._messagesError) {
-        MulticaText({
-          value: `Failed to load messages: ${this._messagesError.message}`,
-          scheme: this.scheme,
-          textSize: 'sm',
-          color: 'destructive'
-        })
-          .padding(space('4'))
+        Column() {
+          MulticaText({
+            value: `Failed to load messages: ${this._messagesError.message}`,
+            scheme: this.scheme,
+            textSize: 'sm',
+            color: 'destructive'
+          })
+        }
+        .layoutWeight(1)
+        .width('100%')
+        .padding(space('4'))
+        .justifyContent(FlexAlign.Center)
       } else {
         Scroll() {
           Column() {
             ForEach(this._messages ?? [], (msg: ChatMessage) => {
-              this.MessageRow(msg, this._session)
+              this.MessageRow(msg)
             })
           }
           .width('100%')
-          .padding({ top: space('2'), bottom: space('2') })
+          .padding({ left: space('1'), right: space('1'), top: space('2'), bottom: space('3') })
+          .alignItems(HorizontalAlign.Start)
         }
         .layoutWeight(1)
         .width('100%')
@@ -150,73 +163,174 @@ export struct ChatDetailPage {
           .padding({ left: space('4'), right: space('4'), top: space('1') })
       }
 
-      Row() {
-        TextInput({ placeholder: 'Message…', text: this.inputDraft })
-          .placeholderColor(String(themeTokens(this.scheme).mutedForeground))
-          .fontColor(String(themeTokens(this.scheme).foreground))
-          .backgroundColor(String(themeTokens(this.scheme).card))
-          .borderRadius(RADIUS.full)
-          .padding(space('3'))
-          .layoutWeight(1)
-          .onChange((value: string) => { this.inputDraft = value; })
-        MulticaText({
-          value: this.sending ? '…' : '↑',
-          scheme: this.scheme,
-          textSize: 'xl',
-          weight: 'bold',
-          color: 'brand'
-        })
-          .margin({ left: space('3') })
-          .onClick(() => { void this.send(); })
-      }
-      .width('100%')
-      .padding(space('3'))
-      .border({
-        width: { top: 1 },
-        color: String(themeTokens(this.scheme).border)
-      })
+      this.Composer()
     }
     .width('100%')
     .height('100%')
     .backgroundColor(String(themeTokens(this.scheme).background))
   }
 
-  @Builder MessageRow(msg: ChatMessage, session: ChatSession | undefined) {
+  @Builder PageHeader() {
     Row() {
-      if (msg.role === 'assistant') {
-        Avatar({ name: session?.agent_name ?? '·', url: session?.agent_avatar_url ?? '', avatarSize: 28, scheme: this.scheme })
-      } else {
-        Blank().width(28)
-      }
-      Column() {
+      Row() {
         MulticaText({
-          value: msg.content,
+          value: '‹',
           scheme: this.scheme,
-          textSize: 'sm',
+          textSize: 'lg',
+          weight: 'medium',
           color: 'foreground'
         })
+      }
+      .width(36)
+      .height(36)
+      .borderRadius(RADIUS.full)
+      .backgroundColor('#F4F4F5')
+      .justifyContent(FlexAlign.Center)
+      .alignItems(VerticalAlign.Center)
+      .onClick(() => { appNavigation.pop(); })
+
+      Column() {
+        MulticaText({
+          value: this.sessionTitle(),
+          scheme: this.scheme,
+          textSize: 'base',
+          weight: 'semibold',
+          color: 'foreground',
+          maxLines: 1,
+          overflow: 'ellipsis'
+        })
+        MulticaText({
+          value: this.sessionSubtitle(),
+          scheme: this.scheme,
+          textSize: 'xs',
+          color: 'mutedForeground',
+          maxLines: 1,
+          overflow: 'ellipsis'
+        })
+          .margin({ top: 2 })
+      }
+      .layoutWeight(1)
+      .margin({ left: space('3') })
+      .alignItems(HorizontalAlign.Start)
+    }
+    .width('100%')
+    .padding({ left: space('4'), right: space('4'), top: space('2'), bottom: space('2') })
+    .backgroundColor(String(themeTokens(this.scheme).background))
+    .alignItems(VerticalAlign.Center)
+  }
+
+  @Builder MessageSkeleton() {
+    Row() {
+      Skeleton({ scheme: this.scheme, skeletonWidth: 28, skeletonHeight: 28, radius: 14 })
+      Column() {
+        Skeleton({ scheme: this.scheme, skeletonWidth: '70%', skeletonHeight: 16, radius: 8 })
+        Skeleton({ scheme: this.scheme, skeletonWidth: '92%', skeletonHeight: 48, radius: 16 })
+          .margin({ top: space('2') })
+      }
+      .layoutWeight(1)
+      .margin({ left: space('2') })
+    }
+    .width('100%')
+    .padding({ left: space('3'), right: space('3'), top: space('2'), bottom: space('2') })
+    .alignItems(VerticalAlign.Top)
+  }
+
+  @Builder Composer() {
+    Column() {
+      Row() {
+        TextInput({ placeholder: 'Message…', text: this.inputDraft })
+          .placeholderColor(String(themeTokens(this.scheme).mutedForeground))
+          .fontColor(String(themeTokens(this.scheme).foreground))
+          .backgroundColor(String(themeTokens(this.scheme).card))
+          .borderRadius(RADIUS.full)
+          .padding({ left: space('4'), right: space('4'), top: space('3'), bottom: space('3') })
+          .layoutWeight(1)
+          .onChange((value: string) => { this.inputDraft = value; })
+
+        Row() {
+          MulticaText({
+            value: this.sending ? '…' : '↑',
+            scheme: this.scheme,
+            textSize: 'lg',
+            weight: 'bold',
+            color: 'brandForeground'
+          })
+        }
+        .width(40)
+        .height(40)
+        .margin({ left: space('2') })
+        .borderRadius(RADIUS.full)
+        .backgroundColor(String(themeTokens(this.scheme).brand))
+        .justifyContent(FlexAlign.Center)
+        .alignItems(VerticalAlign.Center)
+        .opacity(this.inputDraft.trim() || this.sending ? 1 : 0.55)
+        .onClick(() => { void this.send(); })
+      }
+      .width('100%')
+      .padding({ left: space('3'), right: space('3'), top: space('2'), bottom: space('2') })
+      .backgroundColor(String(themeTokens(this.scheme).background))
+    }
+    .width('100%')
+    .padding({ left: space('2'), right: space('2'), top: space('1'), bottom: space('2') })
+    .border({
+      width: { top: 1 },
+      color: String(themeTokens(this.scheme).border)
+    })
+    .backgroundColor(String(themeTokens(this.scheme).background))
+  }
+
+  @Builder MessageRow(msg: ChatMessage) {
+    Row() {
+      if (msg.role === 'assistant') {
+        Avatar({
+          name: this.sessionTitle(),
+          url: this._session?.agent_avatar_url ?? '',
+          avatarSize: 30,
+          scheme: this.scheme
+        })
+      } else {
+        Blank().layoutWeight(1)
+      }
+
+      Column() {
+        if (msg.role === 'assistant') {
+          MulticaText({
+            value: this.sessionTitle(),
+            scheme: this.scheme,
+            textSize: 'xs',
+            weight: 'semibold',
+            color: 'foreground'
+          })
+            .margin({ bottom: 2 })
+        }
+        Column() {
+          MulticaText({
+            value: msg.content,
+            scheme: this.scheme,
+            textSize: 'sm',
+            color: 'foreground'
+          })
+        }
+        .padding({ left: space('3'), right: space('3'), top: space('2.5'), bottom: space('2.5') })
+        .backgroundColor(msg.role === 'assistant' ? '#F6F7FB' : '#EFEFFD')
+        .borderRadius(20)
+        .border({ width: 1, color: msg.role === 'assistant' ? '#ECECF1' : '#DCDCFB' })
+
         MulticaText({
           value: timeAgo(msg.created_at),
           scheme: this.scheme,
           textSize: 'xs',
-          color: 'mutedForeground'
+          color: 'mutedForeground',
+          textAlign: msg.role === 'assistant' ? 'start' : 'end'
         })
-          .margin({ top: space('0.5') })
+          .margin({ top: space('1') })
       }
-      .layoutWeight(1)
-      .margin({ left: space('2') })
-      .alignItems(HorizontalAlign.Start)
+      .constraintSize({ maxWidth: '82%' })
+      .margin({ left: msg.role === 'assistant' ? space('2') : 0 })
+      .alignItems(msg.role === 'assistant' ? HorizontalAlign.Start : HorizontalAlign.End)
     }
     .width('100%')
-    .padding({ left: space('4'), right: space('4'), top: space('1'), bottom: space('1') })
-  }
-
-  @Builder BackButton() {
-    IconButton({
-      glyph: '‹',
-      scheme: this.scheme,
-      accessibilityLabel: 'Back',
-      onTap: () => { appNavigation.pop(); }
-    })
+    .padding({ left: space('3'), right: space('3'), top: space('1.5'), bottom: space('1.5') })
+    .alignItems(VerticalAlign.Top)
   }
 }

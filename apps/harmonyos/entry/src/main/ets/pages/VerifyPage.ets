@@ -1,6 +1,7 @@
 import { appNavigation } from '../data/navigation';
 import { authStore } from '../data/auth';
 import { THEME, ColorScheme, SPACE, RADIUS, space, themeTokens, fontSize } from '../lib/theme';
+import { detectSystemColorScheme } from '../lib/theme-manager';
 import { MulticaText } from '../components/ui/Text';
 import { MulticaButton } from '../components/ui/Button';
 
@@ -24,8 +25,8 @@ export struct VerifyPage {
     this.email = appNavigation.readString('VerifyPage', 'email', '');
   }
 
-  private detectScheme(): ColorScheme {
-    return 'light';
+    private detectScheme(): ColorScheme {
+    return detectSystemColorScheme();
   }
 
   private async verify(): Promise<void> {

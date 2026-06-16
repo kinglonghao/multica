@@ -4,6 +4,7 @@ import { queryClient } from '../queries/cache';
 import { workspaceStore } from '../data/workspace';
 import { CreateIssueRequest, IssueStatus, IssuePriority } from '../models/types';
 import { THEME, ColorScheme, SPACE, RADIUS, space, themeTokens } from '../lib/theme';
+import { detectSystemColorScheme } from '../lib/theme-manager';
 import { statusLabel, priorityLabel } from '../lib/issue-status';
 import { MulticaText } from '../components/ui/Text';
 import { Header } from '../components/ui/Header';
@@ -27,7 +28,7 @@ export struct NewIssuePage {
   }
 
   private detectScheme(): ColorScheme {
-    return 'light';
+    return detectSystemColorScheme();
   }
 
   private async submit(): Promise<void> {
@@ -79,8 +80,8 @@ export struct NewIssuePage {
       Header({
         title: 'New issue',
         scheme: this.scheme,
-        left: this.CancelButton(),
-        right: this.SubmitButton()
+        left: this.CancelButton,
+        right: this.SubmitButton
       })
 
       Scroll() {

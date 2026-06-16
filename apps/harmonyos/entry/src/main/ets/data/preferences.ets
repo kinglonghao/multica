@@ -83,23 +83,33 @@ class PreferencesImpl {
 
   async init(context: common.Context): Promise<void> {
     if (this.store) return;
-    this.store = await preferences.getPreferences(context, STORE_NAME);
+    try {
+      this.store = await preferences.getPreferences(context, STORE_NAME);
+    } catch (err) {
+      const e = err as BusinessError;
+      throw new Error(`Failed to open preferences store: code=${e.code} msg=${e.message}`);
+    }
     this.snapshot = await this.readSnapshot();
   }
 
   private async readSnapshot(): Promise<PreferencesSnapshot> {
     if (!this.store) return cloneSnapshot(EMPTY_SNAPSHOT);
     const out: PreferencesSnapshot = cloneSnapshot(EMPTY_SNAPSHOT);
-    out.authToken = await this.store.get(KEY_AUTH_TOKEN, '') as string || null;
-    out.userId = await this.store.get(KEY_USER_ID, '') as string || null;
-    out.userEmail = await this.store.get(KEY_USER_EMAIL, '') as string || null;
-    out.userDisplay = await this.store.get(KEY_USER_DISPLAY, '') as string || null;
-    out.userAvatar = await this.store.get(KEY_USER_AVATAR, '') as string || null;
-    out.workspaceId = await this.store.get(KEY_WS_ID, '') as string || null;
-    out.workspaceSlug = await this.store.get(KEY_WS_SLUG, '') as string || null;
-    const theme = await this.store.get(KEY_THEME_PREF, 'system') as string;
-    out.themePref = (theme === 'light' || theme === 'dark' || theme === 'system') ? theme : 'system';
-    return out;
+    try {
+      out.authToken = await this.store.get(KEY_AUTH_TOKEN, '') as string || null;
+      out.userId = await this.store.get(KEY_USER_ID, '') as string || null;
+      out.userEmail = await this.store.get(KEY_USER_EMAIL, '') as string || null;
+      out.userDisplay = await this.store.get(KEY_USER_DISPLAY, '') as string || null;
+      out.userAvatar = await this.store.get(KEY_USER_AVATAR, '') as string || null;
+      out.workspaceId = await this.store.get(KEY_WS_ID, '') as string || null;
+      out.workspaceSlug = await this.store.get(KEY_WS_SLUG, '') as string || null;
+      const theme = await this.store.get(KEY_THEME_PREF, 'system') as string;
+      out.themePref = (theme === 'light' || theme === 'dark' || theme === 'system') ? theme : 'system';
+      return out;
+    } catch (err) {
+      const e = err as BusinessError;
+      throw new Error(`Failed to read preferences snapshot: code=${e.code} msg=${e.message}`);
+    }
   }
 
   /**
@@ -133,12 +143,17 @@ class PreferencesImpl {
 
   async setAuth(token: string, user: StoredUser): Promise<void> {
     if (!this.store) return;
-    await this.store.put(KEY_AUTH_TOKEN, token);
-    await this.store.put(KEY_USER_ID, user.id);
-    await this.store.put(KEY_USER_EMAIL, user.email);
-    await this.store.put(KEY_USER_DISPLAY, user.display ?? '');
-    await this.store.put(KEY_USER_AVATAR, user.avatar ?? '');
-    await this.store.flush();
+    try {
+      await this.store.put(KEY_AUTH_TOKEN, token);
+      await this.store.put(KEY_USER_ID, user.id);
+      await this.store.put(KEY_USER_EMAIL, user.email);
+      await this.store.put(KEY_USER_DISPLAY, user.display ?? '');
+      await this.store.put(KEY_USER_AVATAR, user.avatar ?? '');
+      await this.store.flush();
+    } catch (err) {
+      const e = err as BusinessError;
+      throw new Error(`Failed to persist auth preferences: code=${e.code} msg=${e.message}`);
+    }
     const next = cloneSnapshot(this.snapshot);
     next.authToken = token;
     next.userId = user.id;
@@ -151,9 +166,14 @@ class PreferencesImpl {
 
   async setWorkspace(id: string | null, slug: string | null): Promise<void> {
     if (!this.store) return;
-    await this.store.put(KEY_WS_ID, id ?? '');
-    await this.store.put(KEY_WS_SLUG, slug ?? '');
-    await this.store.flush();
+    try {
+      await this.store.put(KEY_WS_ID, id ?? '');
+      await this.store.put(KEY_WS_SLUG, slug ?? '');
+      await this.store.flush();
+    } catch (err) {
+      const e = err as BusinessError;
+      throw new Error(`Failed to persist workspace preferences: code=${e.code} msg=${e.message}`);
+    }
     const next = cloneSnapshot(this.snapshot);
     next.workspaceId = id;
     next.workspaceSlug = slug;
@@ -163,8 +183,13 @@ class PreferencesImpl {
 
   async setThemePref(pref: 'light' | 'dark' | 'system'): Promise<void> {
     if (!this.store) return;
-    await this.store.put(KEY_THEME_PREF, pref);
-    await this.store.flush();
+    try {
+      await this.store.put(KEY_THEME_PREF, pref);
+      await this.store.flush();
+    } catch (err) {
+      const e = err as BusinessError;
+      throw new Error(`Failed to persist theme preference: code=${e.code} msg=${e.message}`);
+    }
     const next = cloneSnapshot(this.snapshot);
     next.themePref = pref;
     this.snapshot = next;
@@ -174,10 +199,15 @@ class PreferencesImpl {
   async clearAuth(): Promise<void> {
     if (!this.store) return;
     const keys = [KEY_AUTH_TOKEN, KEY_USER_ID, KEY_USER_EMAIL, KEY_USER_DISPLAY, KEY_USER_AVATAR, KEY_WS_ID, KEY_WS_SLUG];
-    for (const k of keys) {
-      await this.store.delete(k);
+    try {
+      for (const k of keys) {
+        await this.store.delete(k);
+      }
+      await this.store.flush();
+    } catch (err) {
+      const e = err as BusinessError;
+      throw new Error(`Failed to clear auth preferences: code=${e.code} msg=${e.message}`);
     }
-    await this.store.flush();
     this.snapshot = cloneSnapshot(EMPTY_SNAPSHOT);
     this.emit();
   }

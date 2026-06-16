@@ -2,13 +2,16 @@ import { appNavigation, navParam } from '../data/navigation';
 import { authStore } from '../data/auth';
 import { workspaceStore } from '../data/workspace';
 import { wsClient } from '../realtime/ws-client';
-import { THEME, ColorScheme, SPACE, RADIUS, space, themeTokens } from '../lib/theme';
+import { ColorScheme, RADIUS, space, themeTokens } from '../lib/theme';
+import { detectSystemColorScheme } from '../lib/theme-manager';
 import { MulticaText } from '../components/ui/Text';
 import { Header } from '../components/ui/Header';
 import { Avatar } from '../components/ui/Avatar';
 
 interface MenuItem {
   label: string;
+  hint?: string;
+  icon: string;
   onPress: () => void;
 }
 
@@ -25,8 +28,8 @@ export struct MorePage {
     this.refreshUser();
   }
 
-  private detectScheme(): ColorScheme {
-    return 'light';
+    private detectScheme(): ColorScheme {
+    return detectSystemColorScheme();
   }
 
   private refreshUser(): void {
@@ -37,16 +40,10 @@ export struct MorePage {
   }
 
   private async logout(): Promise<void> {
-    // M-5: wrap in try/catch so a failed local clear doesn't leave
-    // the user in a half-logged-out state with no UI affordance to
-    // recover. The earlier v0.2 code had no try/catch and could leave
-    // the UI on the More tab with an unusable auth state.
     try {
       wsClient.disconnect();
       await workspaceStore.clear();
       await authStore.logout();
-      // Same pattern as Bug 3 fix — clear to root, then push
-      // LoginPage on top so the unauthed state has a visible UI.
       appNavigation.clear();
       appNavigation.pushName('LoginPage');
     } catch (err) {
@@ -56,13 +53,13 @@ export struct MorePage {
 
   private searchMenuItems(): MenuItem[] {
     return [
-      { label: 'Projects', onPress: () => appNavigation.pushName('SearchPage', navParam('tab', 'projects')) },
-      { label: 'Issues', onPress: () => appNavigation.pushName('SearchPage', navParam('tab', 'issues')) },
-      { label: 'Pinned', onPress: () => appNavigation.pushName('SearchPage', navParam('tab', 'pins')) },
-      { label: 'Agents', onPress: () => appNavigation.pushName('AgentsPage') },
-      { label: 'Notifications', onPress: () => appNavigation.pushName('NotificationsPage') },
-      { label: 'Profile', onPress: () => appNavigation.pushName('ProfilePage') },
-      { label: 'Switch workspace', onPress: () => appNavigation.pushName('SwitchWorkspacePage') }
+      { label: 'Projects', hint: '查看项目', icon: '◫', onPress: () => appNavigation.pushName('SearchPage', navParam('tab', 'projects')) },
+      { label: 'Issues', hint: '浏览任务', icon: '☰', onPress: () => appNavigation.pushName('SearchPage', navParam('tab', 'issues')) },
+      { label: 'Pinned', hint: '固定内容', icon: '⌘', onPress: () => appNavigation.pushName('SearchPage', navParam('tab', 'pins')) },
+      { label: 'Agents', hint: '智能体', icon: '✦', onPress: () => appNavigation.pushName('AgentsPage') },
+      { label: 'Notifications', hint: '通知中心', icon: '◉', onPress: () => appNavigation.pushName('NotificationsPage') },
+      { label: 'Profile', hint: '个人资料', icon: '◌', onPress: () => appNavigation.pushName('ProfilePage') },
+      { label: 'Switch workspace', hint: '切换空间', icon: '⇄', onPress: () => appNavigation.pushName('SwitchWorkspacePage') }
     ];
   }
 
@@ -70,14 +67,64 @@ export struct MorePage {
     Column() {
       Header({ title: 'More', scheme: this.scheme })
 
+      Scroll() {
+        Column() {
+          this.ProfileCard()
+
+          Column() {
+            this.MenuList(this.searchMenuItems())
+          }
+          .margin({ left: space('3'), right: space('3'), top: space('3') })
+
+          if (this.logoutError) {
+            MulticaText({
+              value: this.logoutError,
+              scheme: this.scheme,
+              textSize: 'sm',
+              color: 'destructive'
+            })
+              .margin({ left: space('3'), right: space('3'), top: space('3') })
+          }
+
+          Row() {
+            MulticaText({
+              value: 'Sign out',
+              scheme: this.scheme,
+              textSize: 'sm',
+              weight: 'semibold',
+              color: 'destructive'
+            })
+          }
+          .width('100%')
+          .padding({ left: space('4'), right: space('4'), top: space('4'), bottom: space('4') })
+          .backgroundColor('#FFF5F5')
+          .borderRadius(RADIUS.xl)
+          .border({ width: 1, color: '#FECACA' })
+          .margin({ left: space('3'), right: space('3'), top: space('5'), bottom: space('5') })
+          .onClick(() => { void this.logout(); })
+        }
+        .width('100%')
+        .padding({ top: space('2') })
+      }
+      .layoutWeight(1)
+      .width('100%')
+      .scrollBar(BarState.Off)
+    }
+    .width('100%')
+    .height('100%')
+    .backgroundColor('#F7F7F8')
+  }
+
+  @Builder ProfileCard() {
+    Column() {
       Row() {
-        Avatar({ name: this.userName, url: '', avatarSize: 48, scheme: this.scheme })
+        Avatar({ name: this.userName, url: '', avatarSize: 52, scheme: this.scheme })
         Column() {
           MulticaText({
             value: this.userName,
             scheme: this.scheme,
             textSize: 'base',
-            weight: 'medium',
+            weight: 'semibold',
             color: 'foreground'
           })
           MulticaText({
@@ -86,86 +133,122 @@ export struct MorePage {
             textSize: 'xs',
             color: 'mutedForeground'
           })
-            .margin({ top: space('0.5') })
+            .margin({ top: 3 })
         }
         .layoutWeight(1)
         .margin({ left: space('3') })
         .alignItems(HorizontalAlign.Start)
       }
       .width('100%')
-      .padding(space('4'))
-      .onClick(() => { appNavigation.pushName('ProfilePage'); })
 
       if (this.workspaceName) {
         Row() {
-          MulticaText({
-            value: `Workspace: ${this.workspaceName}`,
-            scheme: this.scheme,
-            textSize: 'sm',
-            color: 'mutedForeground'
-          })
+          Column() {
+            MulticaText({
+              value: '当前空间',
+              scheme: this.scheme,
+              textSize: 'xs',
+              color: 'mutedForeground'
+            })
+            MulticaText({
+              value: this.workspaceName,
+              scheme: this.scheme,
+              textSize: 'sm',
+              weight: 'semibold',
+              color: 'foreground'
+            })
+              .margin({ top: 2 })
+          }
+          .alignItems(HorizontalAlign.Start)
+
+          Blank()
+
+          Row() {
+            MulticaText({
+              value: 'Manage',
+              scheme: this.scheme,
+              textSize: 'xs',
+              weight: 'semibold',
+              color: 'brand'
+            })
+          }
+          .padding({ left: space('3'), right: space('3'), top: space('2'), bottom: space('2') })
+          .backgroundColor('#EEF2FF')
+          .borderRadius(RADIUS.full)
         }
         .width('100%')
-        .padding({ left: space('4'), right: space('4'), bottom: space('2') })
-        .onClick(() => { appNavigation.pushName('SwitchWorkspacePage'); })
+        .margin({ top: space('4') })
       }
-
-      this.MenuList(this.searchMenuItems())
-
-      Blank()
-
-      if (this.logoutError) {
-        MulticaText({
-          value: this.logoutError,
-          scheme: this.scheme,
-          textSize: 'sm',
-          color: 'destructive'
-        })
-          .margin({ left: space('4'), right: space('4'), bottom: space('2') })
-      }
-
-      Row() {
-        MulticaText({
-          value: 'Sign out',
-          scheme: this.scheme,
-          textSize: 'base',
-          weight: 'medium',
-          color: 'destructive',
-          textAlign: 'center'
-        })
-      }
-      .width('100%')
-      .padding(space('4'))
-      .backgroundColor(String(themeTokens(this.scheme).card))
-      .borderRadius(RADIUS.md)
-      .margin({ left: space('4'), right: space('4'), bottom: space('4') })
-      .onClick(() => { void this.logout(); })
     }
     .width('100%')
-    .height('100%')
-    .backgroundColor(String(themeTokens(this.scheme).background))
+    .padding({ left: space('4'), right: space('4'), top: space('4'), bottom: space('4') })
+    .margin({ left: space('3'), right: space('3'), top: space('3') })
+    .backgroundColor('#FFFFFF')
+    .borderRadius(RADIUS.xl)
+    .border({ width: 1, color: '#ECECF1' })
+    .onClick(() => { appNavigation.pushName('ProfilePage'); })
   }
 
   @Builder MenuList(items: MenuItem[]) {
     Column() {
-      ForEach(items, (item: MenuItem) => {
+      ForEach(items, (item: MenuItem, index: number) => {
         Row() {
+          Row() {
+            MulticaText({
+              value: item.icon,
+              scheme: this.scheme,
+              textSize: 'sm',
+              color: 'foreground'
+            })
+          }
+          .width(34)
+          .height(34)
+          .borderRadius(10)
+          .backgroundColor('#F4F4F5')
+          .justifyContent(FlexAlign.Center)
+          .alignItems(VerticalAlign.Center)
+
+          Column() {
+            MulticaText({
+              value: item.label,
+              scheme: this.scheme,
+              textSize: 'sm',
+              weight: 'medium',
+              color: 'foreground'
+            })
+            if (item.hint) {
+              MulticaText({
+                value: item.hint,
+                scheme: this.scheme,
+                textSize: 'xs',
+                color: 'mutedForeground'
+              })
+                .margin({ top: 2 })
+            }
+          }
+          .layoutWeight(1)
+          .margin({ left: space('3') })
+          .alignItems(HorizontalAlign.Start)
+
           MulticaText({
-            value: item.label,
+            value: '›',
             scheme: this.scheme,
             textSize: 'base',
-            color: 'foreground'
+            color: 'mutedForeground'
           })
         }
         .width('100%')
-        .padding({ left: space('4'), right: space('4'), top: space('3'), bottom: space('3') })
+        .padding({ left: space('4'), right: space('4'), top: space('3.5'), bottom: space('3.5') })
+        .border(index < items.length - 1 ? {
+          width: { bottom: 1 },
+          color: '#ECECF1'
+        } : undefined)
         .onClick(() => { item.onPress(); })
       })
     }
     .width('100%')
-    .border({
-      width: { top: 1, bottom: 1 },
-      color: String(themeTokens(this.scheme).border)
-    })
+    .backgroundColor('#FFFFFF')
+    .borderRadius(RADIUS.xl)
+    .border({ width: 1, color: '#ECECF1' })
   }
 }

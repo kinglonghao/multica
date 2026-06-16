@@ -1,7 +1,8 @@
 import { appNavigation, navParam } from '../data/navigation';
 import { useIssueListQuery, QueryHandle } from '../queries/issue';
 import { queryClient } from '../queries/cache';
-import { THEME, ColorScheme, SPACE, space, themeTokens } from '../lib/theme';
+import { ColorScheme, RADIUS, space, themeTokens } from '../lib/theme';
+import { detectSystemColorScheme } from '../lib/theme-manager';
 import { MulticaText } from '../components/ui/Text';
 import { Header } from '../components/ui/Header';
 import { Skeleton } from '../components/ui/Skeleton';
@@ -36,8 +37,8 @@ export struct MyIssuesPage {
     this.globalUnsub?.();
   }
 
-  private detectScheme(): ColorScheme {
-    return 'light';
+    private detectScheme(): ColorScheme {
+    return detectSystemColorScheme();
   }
 
   private syncFromCache(): void {
@@ -53,10 +54,17 @@ export struct MyIssuesPage {
   }
 
   build() {
-    Column() {
-      Header({ title: 'My Issues', scheme: this.scheme })
-      this.Body()
-      this.FloatingAction()
+    Stack({ alignContent: Alignment.BottomEnd }) {
+      Column() {
+        Header({ title: 'My Issues', scheme: this.scheme })
+        this.Body()
+      }
+      .width('100%')
+      .height('100%')
+
+      if (!this._isLoading && !this._error) {
+        this.FloatingAction()
+      }
     }
     .width('100%')
     .height('100%')
@@ -68,35 +76,99 @@ export struct MyIssuesPage {
       Column() {
         ForEach([1, 2, 3, 4, 5], () => {
           Row() {
-            Skeleton({ scheme: this.scheme, skeletonWidth: '85%', skeletonHeight: 18, radius: 4 })
+            Skeleton({ scheme: this.scheme, skeletonWidth: '100%', skeletonHeight: 76, radius: RADIUS.lg })
           }
-          .padding({ left: space('4'), right: space('4'), top: space('3'), bottom: space('3') })
+          .padding({ left: space('3'), right: space('3'), top: space('1.5'), bottom: space('1.5') })
         })
       }
       .layoutWeight(1)
       .width('100%')
+      .padding({ top: space('1') })
     } else if (this._error) {
-      MulticaText({
-        value: `Failed to load issues: ${this._error.message}`,
-        scheme: this.scheme,
-        textSize: 'sm',
-        color: 'destructive'
-      })
-        .padding(space('4'))
+      Stack({ alignContent: Alignment.Center }) {
+        Column() {
+          MulticaText({
+            value: '加载失败',
+            scheme: this.scheme,
+            textSize: 'lg',
+            weight: 'semibold',
+            textAlign: 'center'
+          })
+          MulticaText({
+            value: this._error.message,
+            scheme: this.scheme,
+            textSize: 'sm',
+            color: 'mutedForeground',
+            textAlign: 'center'
+          })
+            .margin({ top: space('2') })
+        }
+        .padding(space('6'))
+      }
+      .layoutWeight(1)
+      .width('100%')
     } else if (this.issueItems().length === 0) {
       Stack({ alignContent: Alignment.Center }) {
-        MulticaText({
-          value: 'No open issues — you\'re all caught up!',
-          scheme: this.scheme,
-          textSize: 'sm',
-          color: 'mutedForeground',
-          textAlign: 'center'
-        })
+        Column() {
+          MulticaText({
+            value: '今天没有待处理事项',
+            scheme: this.scheme,
+            textSize: 'lg',
+            weight: 'semibold',
+            textAlign: 'center'
+          })
+          MulticaText({
+            value: '你已经清空当前待办了。',
+            scheme: this.scheme,
+            textSize: 'sm',
+            color: 'mutedForeground',
+            textAlign: 'center'
+          })
+            .margin({ top: space('2') })
+        }
       }
       .layoutWeight(1)
       .width('100%')
     } else {
       List({ space: 0 }) {
+        ListItem() {
+          Column() {
+            Row() {
+              Column() {
+                MulticaText({
+                  value: '进行中的事项',
+                  scheme: this.scheme,
+                  textSize: 'lg',
+                  weight: 'bold'
+                })
+                MulticaText({
+                  value: `${this.issueItems().length} 条需要关注`,
+                  scheme: this.scheme,
+                  textSize: 'xs',
+                  color: 'mutedForeground'
+                })
+                  .margin({ top: 4 })
+              }
+              .alignItems(HorizontalAlign.Start)
+            }
+            .width('100%')
+
+            Row() {
+              MulticaText({
+                value: '按最近更新排序',
+                scheme: this.scheme,
+                textSize: 'xs',
+                color: 'mutedForeground'
+              })
+            }
+            .margin({ top: space('2') })
+            .padding({ left: space('2'), right: space('2'), top: 3, bottom: 3 })
+            .borderRadius(RADIUS.full)
+            .backgroundColor(String(themeTokens(this.scheme).card))
+          }
+          .padding({ left: space('3'), right: space('3'), top: space('3'), bottom: space('1.5') })
+        }
+
         ForEach(this.issueItems(), (issue: Issue) => {
           ListItem() {
             IssueRow({
@@ -105,14 +177,18 @@ export struct MyIssuesPage {
               onPress: () => { appNavigation.pushName('IssueDetailPage', navParam('id', issue.id)); }
             })
           }
-          .border({
-            width: { bottom: 1 },
-            color: String(themeTokens(this.scheme).border)
-          })
+          .padding({ left: space('3'), right: space('3'), top: 5, bottom: 5 })
         })
+
+        ListItem() {
+          Row() {}
+            .height(72)
+        }
       }
       .layoutWeight(1)
       .width('100%')
+      .padding({ top: 2 })
+      .divider(null)
     }
   }
 
@@ -126,8 +202,10 @@ export struct MyIssuesPage {
         color: 'brandForeground'
       })
     }
-    .width('100%')
-    .height(56)
+    .width(52)
+    .height(52)
+    .margin({ right: space('4'), bottom: space('4') })
+    .borderRadius(RADIUS.full)
     .backgroundColor(String(themeTokens(this.scheme).brand))
     .justifyContent(FlexAlign.Center)
     .alignItems(VerticalAlign.Center)

@@ -1,4 +1,5 @@
 import http from '@ohos.net.http';
+import fs from '@ohos.file.fs';
 import { BusinessError } from '@ohos.base';
 import { Preferences } from './preferences';
 import {
@@ -44,9 +45,11 @@ import { ParseOptions, parseWithFallback } from '../lib/parse-response';
 import { CancelToken } from '../queries/cache';
 import {
   AgentTaskListSchema,
+  AgentListSchema,
   ChatMessageListSchema,
   CommentListSchema,
   CommentSchema,
+  EMPTY_AGENT_LIST,
   EMPTY_AGENT_TASK_LIST,
   EMPTY_CHAT_MESSAGE_LIST,
   EMPTY_COMMENT,
@@ -226,13 +229,19 @@ class ApiClient {
     const start = Date.now();
 
     const httpRequest = http.createHttp();
-    const requestTask = httpRequest.request(url, {
-      method: method as http.RequestMethod,
-      header: headers,
-      extraData: body !== undefined ? JSON.stringify(body) : undefined,
-      connectTimeout: FETCH_TIMEOUT_MS,
-      readTimeout: FETCH_TIMEOUT_MS
-    });
+    let requestTask: Promise<http.HttpResponse>;
+    try {
+      requestTask = httpRequest.request(url, {
+        method: method as http.RequestMethod,
+        header: headers,
+        extraData: body !== undefined ? JSON.stringify(body) : undefined,
+        connectTimeout: FETCH_TIMEOUT_MS,
+        readTimeout: FETCH_TIMEOUT_MS
+      });
+    } catch (err) {
+      httpRequest.destroy();
+      throw err instanceof Error ? err : new Error('Failed to create request');
+    }
 
     let timeoutHandle: number | null = null;
     const timeoutPromise = new Promise<never>((_, reject) => {
@@ -539,7 +548,10 @@ class ApiClient {
   // -------- Agents --------
 
   async listAgents(opts?: RequestOpts): Promise<Agent[]> {
-    return this.request<Agent[]>('GET', '/api/agents', undefined, opts);
+    const raw = await this.request<Object>('GET', '/api/agents', undefined, opts);
+    return parseWithFallback(raw, AgentListSchema, EMPTY_AGENT_LIST, {
+      endpoint: 'GET /api/agents'
+    });
   }
 
   async listAgentTasks(agentId: string, opts?: RequestOpts): Promise<AgentTask[]> {
@@ -613,13 +625,107 @@ class ApiClient {
   }
 
   async uploadFile(parentId: string, file: UploadFileAsset): Promise<Attachment> {
-    // The shape mirrors the iOS FileAsset (apps/mobile/data/api.ts). On HarmonyOS
-    // uploads use the same FormData+RequestBody pattern via @ohos.net.http.
-    // Implementation is intentionally a stub here — the data flow is
-    // identical (multipart/form-data, X-Request-ID, Bearer auth) but the
-    // @ohos.net.http FormData surface differs from web fetch. Wire up the
-    // real upload in a follow-up.
-    throw new ApiError('uploadFile: not yet implemented on HarmonyOS', 501);
+    const id = rid();
+    const url = `${BASE_URL}/api/attachments`;
+    const token = Preferences.get('authToken');
+    const slug = Preferences.get('workspaceSlug');
+    
+    console.info(`[api] → POST /api/attachments rid=${id} parentId=${parentId} filename=${file.name}`);
+    const start = Date.now();
+
+    // 读取文件内容
+    let fileContent: ArrayBuffer;
+    try {
+      const fileStat = fs.statSync(file.uri);
+      if (!fileStat.isFile()) {
+        throw new Error(`Path ${file.uri} is not a file`);
+      }
+      
+      const fd = fs.openSync(file.uri, fs.OpenMode.READ_ONLY);
+      try {
+        fileContent = new ArrayBuffer(fileStat.size);
+        fs.readSync(fd.fd, fileContent);
+      } finally {
+        fs.closeSync(fd);
+      }
+    } catch (err) {
+      console.error(`[api] Failed to read file ${file.uri}:`, err);
+      throw new Error(`Failed to read file: ${err.message}`);
+    }
+
+    const httpRequest = http.createHttp();
+    
+    // 构建multipart/form-data请求
+    const fileFormData: http.MultiFormData = {
+      name: 'file',
+      contentType: file.type || 'application/octet-stream',
+      remoteFileName: file.name,
+      data: fileContent
+    };
+    const multiFormDataList: http.MultiFormData[] = [fileFormData];
+
+    // 添加其他表单数据
+    const extraData = `parent_id=${encodeURIComponent(parentId)}`;
+
+    const headers: RequestHeaders = {
+      'X-Request-ID': id,
+      'Content-Type': 'multipart/form-data',
+      'Accept': 'application/json',
+      'Authorization': token ? `Bearer ${token}` : undefined,
+      'X-Workspace-Slug': slug ?? undefined
+    };
+
+    let requestTask: Promise<http.HttpResponse>;
+    try {
+      requestTask = httpRequest.request(url, {
+        method: http.RequestMethod.POST,
+        header: headers,
+        extraData: extraData,
+        multiFormDataList: multiFormDataList,
+        connectTimeout: FETCH_TIMEOUT_MS,
+        readTimeout: FETCH_TIMEOUT_MS
+      });
+    } catch (err) {
+      httpRequest.destroy();
+      throw err instanceof Error ? err : new Error('Failed to create upload request');
+    }
+
+    let timeoutHandle: number | null = null;
+    const timeoutPromise = new Promise<never>((_, reject) => {
+      timeoutHandle = setTimeout(() => {
+        httpRequest.destroy();
+        reject(new ApiError('Request timeout', 0));
+      }, FETCH_TIMEOUT_MS);
+    });
+
+    try {
+      const response = await Promise.race([requestTask, timeoutPromise]);
+      if (timeoutHandle) clearTimeout(timeoutHandle);
+      
+      const status = response.responseCode;
+      const rawBody = response.result as string;
+      const duration = Date.now() - start;
+      const logFn = status >= 500 ? console.error : status === 404 ? console.warn : console.info;
+      logFn(`[api] ← ${status} /api/attachments rid=${id} dur=${duration}ms`);
+
+      if (status === 401) {
+        this.options.onUnauthorized?.();
+        throw new ApiError('Unauthorized', 401, rawBody);
+      }
+      if (status < 200 || status >= 300) {
+        throw new ApiError(`HTTP ${status}`, status, rawBody);
+      }
+      
+      try {
+        return JSON.parse(rawBody) as Attachment;
+      } catch {
+        throw new ApiError('Invalid JSON response', status, rawBody);
+      }
+    } catch (err) {
+      if (timeoutHandle) clearTimeout(timeoutHandle);
+      httpRequest.destroy();
+      throw err instanceof Error ? err : new Error('Upload request failed');
+    }
   }
 
   // -------- Search --------

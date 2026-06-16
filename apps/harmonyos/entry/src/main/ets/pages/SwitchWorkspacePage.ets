@@ -1,10 +1,9 @@
 import { appNavigation } from '../data/navigation';
 import { workspaceStore } from '../data/workspace';
 import { Workspace } from '../models/types';
-import { THEME, ColorScheme, SPACE, RADIUS, space, themeTokens } from '../lib/theme';
+import { ColorScheme, RADIUS, space, themeTokens } from '../lib/theme';
+import { detectSystemColorScheme } from '../lib/theme-manager';
 import { MulticaText } from '../components/ui/Text';
-import { Header } from '../components/ui/Header';
-import { IconButton } from '../components/ui/IconButton';
 import { Skeleton } from '../components/ui/Skeleton';
 
 @ComponentV2
@@ -18,8 +17,8 @@ export struct SwitchWorkspacePage {
     void this.load();
   }
 
-  private detectScheme(): ColorScheme {
-    return 'light';
+    private detectScheme(): ColorScheme {
+    return detectSystemColorScheme();
   }
 
   private async load(): Promise<void> {
@@ -34,75 +33,73 @@ export struct SwitchWorkspacePage {
 
   private async pick(ws: Workspace): Promise<void> {
     await workspaceStore.setCurrent(ws.id, ws.slug);
-    // Bug 3 fix: same as SelectWorkspacePage — pop back to the root
-    // so the tab content refetches under the new workspace context.
     appNavigation.clear();
   }
 
   build() {
     Column() {
-      Header({
-        title: 'Switch workspace',
-        scheme: this.scheme,
-        left: this.BackButton()
-      })
-
       if (this.loading) {
         Column() {
           ForEach([1, 2, 3], () => {
-            Skeleton({ scheme: this.scheme, skeletonWidth: '90%', skeletonHeight: 56, radius: 8 })
-              .margin({ top: space('3') })
+            Skeleton({ scheme: this.scheme, skeletonWidth: '100%', skeletonHeight: 48, radius: RADIUS.lg })
+              .margin({ top: space('2') })
           })
         }
-        .padding(space('4'))
+        .layoutWeight(1)
+        .padding({ left: space('3'), right: space('3'), top: space('3') })
         .width('100%')
       } else {
         List({ space: 0 }) {
           ForEach(this.workspaces, (ws: Workspace) => {
             ListItem() {
               Row() {
-                MulticaText({
-                  value: ws.name,
-                  scheme: this.scheme,
-                  textSize: 'base',
-                  weight: 'medium',
-                  color: 'foreground'
-                })
+                Column() {
+                  MulticaText({
+                    value: ws.name,
+                    scheme: this.scheme,
+                    textSize: 'sm',
+                    weight: 'medium',
+                    color: 'foreground'
+                  })
+                  if (ws.slug) {
+                    MulticaText({
+                      value: ws.slug,
+                      scheme: this.scheme,
+                      textSize: 'xs',
+                      color: 'mutedForeground'
+                    })
+                      .margin({ top: 2 })
+                  }
+                }
+                .alignItems(HorizontalAlign.Start)
+
+                Blank()
+
                 if (ws.id === workspaceStore.currentId) {
-                  Blank()
                   MulticaText({
                     value: '✓',
                     scheme: this.scheme,
-                    textSize: 'base',
-                    weight: 'medium',
+                    textSize: 'sm',
+                    weight: 'semibold',
                     color: 'brand'
                   })
                 }
               }
               .width('100%')
-              .padding(space('4'))
-              .backgroundColor(String(themeTokens(this.scheme).card))
-              .borderRadius(RADIUS.md)
-              .margin({ top: space('2'), left: space('4'), right: space('4') })
+              .padding({ left: space('3'), right: space('3'), top: space('3'), bottom: space('3') })
               .onClick(() => { void this.pick(ws); })
             }
           })
         }
         .layoutWeight(1)
         .width('100%')
+        .padding({ left: space('3'), right: space('3'), top: space('3') })
+        .divider(null)
+        .backgroundColor(String(themeTokens(this.scheme).background))
       }
     }
     .width('100%')
     .height('100%')
     .backgroundColor(String(themeTokens(this.scheme).background))
-  }
-
-  @Builder BackButton() {
-    IconButton({
-      glyph: '‹',
-      scheme: this.scheme,
-      accessibilityLabel: 'Back',
-      onTap: () => { appNavigation.pop(); }
-    })
   }
 }

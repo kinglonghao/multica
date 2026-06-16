@@ -2,6 +2,7 @@ import { appNavigation } from '../data/navigation';
 import { workspaceStore } from '../data/workspace';
 import { Workspace } from '../models/types';
 import { THEME, ColorScheme, SPACE, RADIUS, space, themeTokens } from '../lib/theme';
+import { detectSystemColorScheme } from '../lib/theme-manager';
 import { MulticaText } from '../components/ui/Text';
 import { Header } from '../components/ui/Header';
 import { Skeleton } from '../components/ui/Skeleton';
@@ -18,8 +19,8 @@ export struct SelectWorkspacePage {
     void this.load();
   }
 
-  private detectScheme(): ColorScheme {
-    return 'light';
+    private detectScheme(): ColorScheme {
+    return detectSystemColorScheme();
   }
 
   private async load(): Promise<void> {

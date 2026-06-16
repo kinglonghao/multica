@@ -6,39 +6,29 @@ import { api } from '../data/api';
 import { queryClient } from '../queries/cache';
 import { workspaceStore } from '../data/workspace';
 import { deduplicateInboxItems } from '../lib/inbox-display';
-import { markInboxRead, cloneInboxItem } from '../mutations/inbox';
+import { markInboxRead, cloneInboxItem, markAllInboxRead, archiveAllInbox, archiveAllReadInbox, archiveCompletedInbox, archiveInboxItem } from '../mutations/inbox';
 import { InboxItem, Issue } from '../models/types';
-import { THEME, ColorScheme, SPACE, space, themeTokens } from '../lib/theme';
+import { ColorScheme, space, themeTokens } from '../lib/theme';
+import { detectSystemColorScheme } from '../lib/theme-manager';
 import { MulticaText } from '../components/ui/Text';
 import { Skeleton } from '../components/ui/Skeleton';
 import { Header } from '../components/ui/Header';
 import { IconButton } from '../components/ui/IconButton';
 import { InboxRow } from '../components/inbox/InboxRow';
+import { MulticaButton } from '../components/ui/Button';
 
 @ComponentV2
 export struct InboxPage {
   @Local scheme: ColorScheme = 'light';
   @Local version: number = 0;
   @Local issueCache: Map<string, Issue> = new Map();
-  // H-1 fix: ArkUI's reactive system only tracks @Local fields that
-  // are *actually read* inside build(). The previous attempts
-  // (version++, renderTick++, .id(renderTick)) all failed because
-  // build() never touched those fields in a way ArkUI would track.
-  // The reliable fix is to mirror the three cache fields we render
-  // on into @Local slots, then read those slots inside build() —
-  // `if (this._isLoading)` is a guaranteed observable read.
-  // syncFromCache() runs from aboutToAppear and from the cache's
-  // onUpdate callback, so the mirrors stay in lockstep with the
-  // cache and ArkUI rebuilds the subtree on every change.
   @Local _isLoading: boolean = true;
   @Local _data: InboxItem[] | undefined = undefined;
   @Local _error: Error | null = null;
+  @Local menuVisible: boolean = false;
+  @Local menuBusy: boolean = false;
+  @Local swipingItemId: string = '';
   private query: QueryHandle<InboxItem[]> | null = null;
-  // Bug 9 fix: hydrateIssueCache can fire from BOTH aboutToAppear
-  // and the onUpdate callback. Without this Set, two concurrent
-  // invocations both pass the `this.issueCache.has(id)` check
-  // (because neither has written yet) and double-fetch the same
-  // issue. The Set tracks IDs whose fetch is in flight.
   private hydrationInFlight: Set<string> = new Set();
   private wsUnsub?: () => void;
   private globalUnsub?: () => void;
@@ -53,20 +43,9 @@ export struct InboxPage {
     this.globalUnsub = queryClient.onAnyStateChange(() => { this.syncFromCache(); });
     this.syncFromCache();
     void this.hydrateIssueCache();
-    // Subscribe to the iOS-parity inbox events
-    // (inbox:new/read/archived + batch variants) for the current
-    // workspace. The hook invalidates the inbox list cache so the
-    // next subscriber refetches.
     this.wsUnsub = useInboxRealtime();
   }
 
-  /**
-   * Mirror the cache's current state into @Local fields. The cache
-   * state itself is not a @Local (it's stored in a Map on a
-   * singleton), so reads via this.query.getState() inside build()
-   * don't trigger re-renders. The @Local mirrors ARE tracked, so
-   * every assignment from this method schedules a build.
-   */
   private syncFromCache(): void {
     if (!this.query) return;
     const s = this.query.getState();
@@ -81,27 +60,10 @@ export struct InboxPage {
     this.globalUnsub?.();
   }
 
-  private detectScheme(): ColorScheme {
-    return 'light';
+    private detectScheme(): ColorScheme {
+    return detectSystemColorScheme();
   }
 
-  /**
-   * H-2: the v0.2 inbox had an empty `issueCache` — rows showed
-   * "MUL-123 · <empty title>" because no one ever populated it.
-   * The fix: every time the inbox list updates, fan out a getIssue
-   * fetch for every distinct issue_id and store the result in
-   * the cache. Each getIssue hits the cache key
-   * `['issue', wsId, id]` (set up by `useIssueDetailQuery`), so
-   * a later visit to the issue detail page reuses the fetched data
-   * and the inbox row's title/identifier are populated.
-   *
-   * v0.4 hardening: bump `version` after every cache write so a
-   * page that didn't itself receive the `onUpdate` callback
-   * (e.g. a navigated-back instance whose subscription was torn
-   * down) still re-renders. Belt and suspenders — `@Local` should
-   * already fire on the map reference swap, but the extra bump
-   * makes the data flow obvious to the next reader.
-   */
   private async hydrateIssueCache(): Promise<void> {
     if (!this.query) return;
     const state = this.query.getState();
@@ -116,7 +78,6 @@ export struct InboxPage {
       this.hydrationInFlight.add(item.issue_id);
       try {
         const issue = await api.getIssue(item.issue_id);
-        // Build a new map (immutable) so the page re-renders.
         const next = new Map(this.issueCache);
         next.set(item.issue_id, issue);
         this.issueCache = next;
@@ -130,24 +91,32 @@ export struct InboxPage {
   }
 
   build() {
-    Column() {
-      Header({
-        title: 'Inbox',
-        scheme: this.scheme,
-        right: this.ActionsRow()
+    Stack({ alignContent: Alignment.Bottom }) {
+      Column() {
+        Header({
+          title: 'Inbox',
+          scheme: this.scheme
+        })
+
+        if (this._isLoading) {
+          this.LoadingState()
+        } else if (this._error) {
+          this.ErrorState(this._error.message)
+        } else if (deduplicateInboxItems(this._data ?? []).length === 0) {
+          this.EmptyState()
+        } else {
+          this.List(deduplicateInboxItems(this._data ?? []))
+        }
+      }
+      .width('100%')
+      .height('100%')
+      .backgroundColor(String(themeTokens(this.scheme).background))
+      .onClick(() => {
+        if (this.menuVisible) this.menuVisible = false;
       })
 
-      // H-1 fix: read from the @Local mirrors, not from the cache
-      // directly. ArkUI tracks these reads; cache.getState() reads
-      // would not.
-      if (this._isLoading) {
-        this.LoadingState()
-      } else if (this._error) {
-        this.ErrorState(this._error.message)
-      } else if (deduplicateInboxItems(this._data ?? []).length === 0) {
-        this.EmptyState()
-      } else {
-        this.List(deduplicateInboxItems(this._data ?? []))
+      if (this.menuVisible) {
+        this.MenuSheet()
       }
     }
     .id(`InboxPage-v${this.version}`)
@@ -156,15 +125,67 @@ export struct InboxPage {
     .backgroundColor(String(themeTokens(this.scheme).background))
   }
 
-  @Builder ActionsRow() {
+  @Builder FloatingMenuButton() {
+    Column() {
+      Blank().layoutWeight(1)
+      Row() {
+        Blank()
+        IconButton({
+          glyph: '⋯',
+          scheme: this.scheme,
+          accessibilityLabel: 'Inbox actions',
+          onTap: () => { this.menuVisible = !this.menuVisible; }
+        })
+      }
+      .width('100%')
+      .padding({ left: space('4'), right: space('4'), bottom: space('3') })
+    }
+    .width('100%')
+    .height('100%')
+    .hitTestBehavior(HitTestMode.Transparent)
+  }
+
+  @Builder MenuSheet() {
+    Stack({ alignContent: Alignment.Bottom }) {
+      Column()
+        .width('100%')
+        .height('100%')
+        .backgroundColor('#00000022')
+        .onClick(() => { this.menuVisible = false; })
+
+      Column() {
+        this.MenuAction('Mark all read', false, () => { void this.runMenuAction(() => markAllInboxRead()); })
+        this.MenuAction('Archive all read', false, () => { void this.runMenuAction(() => archiveAllReadInbox()); })
+        this.MenuAction('Archive completed', false, () => { void this.runMenuAction(() => archiveCompletedInbox()); })
+        this.MenuAction('Archive all', true, () => { void this.runMenuAction(() => archiveAllInbox()); })
+        this.MenuAction('Cancel', false, () => { this.menuVisible = false; })
+      }
+      .width('100%')
+      .padding({ left: space('3'), right: space('3'), bottom: space('3') })
+    }
+    .width('100%')
+    .height('100%')
+  }
+
+  @Builder MenuAction(label: string, destructive: boolean, onTap: () => void) {
     Row() {
-      IconButton({
-        glyph: '⋯',
+      MulticaText({
+        value: label,
         scheme: this.scheme,
-        accessibilityLabel: 'Inbox actions',
-        onTap: () => { void this.archiveAllRead(); }
+        textSize: 'base',
+        weight: 'medium',
+        color: destructive ? 'destructive' : 'foreground',
+        textAlign: 'center'
       })
     }
+    .width('100%')
+    .padding({ left: space('4'), right: space('4'), top: space('4'), bottom: space('4') })
+    .backgroundColor(String(themeTokens(this.scheme).background))
+    .borderRadius(14)
+    .margin({ top: space('2') })
+    .justifyContent(FlexAlign.Center)
+    .onClick(() => { if (!this.menuBusy) onTap(); })
+    .opacity(this.menuBusy ? 0.6 : 1)
   }
 
   @Builder LoadingState() {
@@ -241,17 +262,11 @@ export struct InboxPage {
     .layoutWeight(1)
     .width('100%')
     .listDirection(Axis.Vertical)
+    .scrollBar(BarState.Off)
   }
 
   private onPressItem(item: InboxItem): void {
     if (!item.read) {
-      // Bug 7 fix: route through the mutation module, not the raw
-      // API. The mutation does the optimistic patch + server call
-      // + cache invalidate. Calling api.markInboxRead() directly
-      // skipped the invalidate, so the prior server-truth could
-      // drift on a future refetch (and the row would flip back to
-      // "unread" if the server had a different state than our
-      // optimistic patch).
       void markInboxRead(item.id);
     }
     if (item.issue_id) {
@@ -259,25 +274,20 @@ export struct InboxPage {
     }
   }
 
-  private async archiveAllRead(): Promise<void> {
-    queryClient.setQueryData(['inbox', workspaceStore.currentId], (prev: InboxItem[] | undefined) => {
-      if (!prev) return [];
-      return prev.map((i): InboxItem => {
-        if (!i.read) return i;
-        const copy = cloneInboxItem(i);
-        copy.archived = true;
-        return copy;
-      });
-    });
-    // H-1 fix: setQueryData doesn't fire the observer, so the
-    // @Local mirrors in this page don't get the optimistic update
-    // unless we sync them by hand. Pull the just-written data into
-    // _data so the UI flips immediately.
-    this.syncFromCache();
+  private async runMenuAction(action: () => Promise<void>): Promise<void> {
+    this.menuBusy = true;
     try {
-      await api.archiveAllReadInbox();
+      await action();
+      this.syncFromCache();
+      this.menuVisible = false;
     } finally {
-      queryClient.invalidate(['inbox', workspaceStore.currentId]);
+      this.menuBusy = false;
     }
+  }
+
+  private async archiveItem(itemId: string): Promise<void> {
+    this.swipingItemId = '';
+    await archiveInboxItem(itemId);
+    this.syncFromCache();
   }
 }

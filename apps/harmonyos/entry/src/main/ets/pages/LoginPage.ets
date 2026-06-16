@@ -1,6 +1,7 @@
 import { appNavigation, navParam } from '../data/navigation';
 import { authStore } from '../data/auth';
 import { THEME, ColorScheme, SPACE, RADIUS, space, themeTokens } from '../lib/theme';
+import { detectSystemColorScheme } from '../lib/theme-manager';
 import { MulticaText } from '../components/ui/Text';
 import { MulticaButton } from '../components/ui/Button';
 
@@ -15,8 +16,8 @@ export struct LoginPage {
     this.scheme = this.detectScheme();
   }
 
-  private detectScheme(): ColorScheme {
-    return 'light';
+    private detectScheme(): ColorScheme {
+    return detectSystemColorScheme();
   }
 
   private isValidEmail(email: string): boolean {

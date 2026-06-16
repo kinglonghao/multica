@@ -2,6 +2,7 @@ import { appNavigation } from '../data/navigation';
 import { authStore } from '../data/auth';
 import { workspaceStore } from '../data/workspace';
 import { THEME, ColorScheme } from '../lib/theme';
+import { detectSystemColorScheme } from '../lib/theme-manager';
 import { MulticaText } from '../components/ui/Text';
 import { WorkspaceLayout } from './WorkspaceLayout';
 import { PageDestinations } from './destinations';
@@ -51,7 +52,7 @@ struct Index {
   }
 
   private detectScheme(): ColorScheme {
-    return 'light';
+    return detectSystemColorScheme();
   }
 
   build() {

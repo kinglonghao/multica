@@ -1,5 +1,6 @@
 import hilog from '@ohos.hilog';
 import { appNavigation } from '../data/navigation';
+import { globalEvents } from '../data/auth';
 import { useIssueDetailQuery, QueryHandle } from '../queries/issue';
 import { useQuery, QueryHandle as QH, FetchContext } from '../queries/cache';
 import { useIssueRealtime } from '../realtime/realtime-hooks';
@@ -10,6 +11,7 @@ import { workspaceStore } from '../data/workspace';
 import { issueDetailKey } from '../queries/issue';
 import { authStore } from '../data/auth';
 import { THEME, ColorScheme, SPACE, RADIUS, textColor, space, themeTokens } from '../lib/theme';
+import { detectSystemColorScheme } from '../lib/theme-manager';
 import { timeAgo } from '../lib/utils';
 import { statusLabel, priorityLabel } from '../lib/issue-status';
 import { MulticaText } from '../components/ui/Text';
@@ -24,10 +26,28 @@ import { MulticaButton } from '../components/ui/Button';
 import { Card } from '../components/ui/Card';
 import { Issue, Comment, IssueStatus, IssuePriority, UpdateIssueRequest, Agent, MemberWithUser } from '../models/types';
 
+interface DisplayComment {
+  id: string;
+  issue_id: string;
+  body: string;
+  content?: string | null;
+  author_id: string;
+  author_name?: string | null;
+  author_avatar_url?: string | null;
+  author_type?: 'member' | 'agent' | null;
+  created_at: string;
+  updated_at: string;
+  edited?: boolean;
+  reactions?: Object[];
+  display_author_name?: string | null;
+  display_author_avatar_url?: string | null;
+}
+
 const COMMENTS_KEY = (id: string): readonly (string | number | boolean)[] => ['issue-comments', id];
 const AGENTS_KEY = (wsId: string | null): readonly (string | number | boolean | null)[] => ['agents', wsId];
 const MEMBERS_KEY = (wsId: string | null): readonly (string | number | boolean | null)[] => ['members', wsId];
 const COMMENT_BOX_HEIGHT = 112;
+const COMMENT_BOX_COLLAPSED_HEIGHT = 40;
 const COMMENT_ROW_MIN_HEIGHT = 72;
 const COMMENT_MAX_LENGTH = 2000;
 const ISSUE_DETAIL_DEBUG_DOMAIN = 0xFF12;
@@ -39,6 +59,7 @@ export struct IssueDetailPage {
   @Local scheme: ColorScheme = 'light';
   @Local version: number = 0;
   @Local commentDraft: string = '';
+  @Local commentComposerExpanded: boolean = false;
   @Local sendingComment: boolean = false;
   @Local commentError: string = '';
   @Local editingCommentId: string = '';
@@ -47,6 +68,9 @@ export struct IssueDetailPage {
   @Local _issueIsLoading: boolean = true;
   @Local _issue: Issue | undefined = undefined;
   @Local _issueError: Error | null = null;
+  @Local _issueActorName: string = '';
+  @Local _issueActorAvatar: string = '';
+  @Local _issueActorLabel: string = 'Owner';
   @Local _commentsIsLoading: boolean = true;
   @Local _comments: Comment[] | undefined = undefined;
   @Local _commentsError: Error | null = null;
@@ -57,6 +81,7 @@ export struct IssueDetailPage {
   private members: QH<MemberWithUser[]> | null = null;
   private wsUnsub?: () => void;
   private globalUnsub?: () => void;
+  private workspaceChangedUnsub?: () => void;
 
   // #region debug-point issue-detail-log
   private debugInfo(stage: string, extra: string = ''): void {
@@ -109,12 +134,15 @@ export struct IssueDetailPage {
     this.globalUnsub?.();
   }
 
-  private detectScheme(): ColorScheme {
-    return 'light';
+    private detectScheme(): ColorScheme {
+    return detectSystemColorScheme();
   }
 
   private syncFromCache(): void {
     try {
+      const currentWsId = workspaceStore.currentId;
+      const issueWsId = this._issue?.workspace_id ?? this.query?.getState().data?.workspace_id ?? 'null';
+      this.debugInfo('sync:workspace', `current=${currentWsId ?? 'null'} issueWorkspace=${issueWsId}`);
       if (this.query) {
         const s = this.query.getState();
         this._issueIsLoading = s.isLoading;
@@ -128,6 +156,17 @@ export struct IssueDetailPage {
         this._comments = s.data as Comment[] | undefined;
         this._commentsError = s.error;
         this.debugInfo('sync:comments', `loading=${s.isLoading} count=${s.data ? s.data.length : -1} error=${s.error ? s.error.message : 'none'}`);
+      }
+      if (this.agents) {
+        const s = this.agents.getState();
+        const count = s.data ? s.data.length : -1;
+        const first = s.data && s.data.length > 0 ? `${s.data[0].id}:${s.data[0].name}` : 'none';
+        this.debugInfo('sync:agents', `loading=${s.isLoading} count=${count} first=${first} error=${s.error ? s.error.message : 'none'}`);
+      }
+      if (this.members) {
+        const s = this.members.getState();
+        const count = s.data ? s.data.length : -1;
+        this.debugInfo('sync:members', `loading=${s.isLoading} count=${count} error=${s.error ? s.error.message : 'none'}`);
       }
     } catch (err) {
       this.debugError('syncFromCache:throw', err as Object);
@@ -144,6 +183,7 @@ export struct IssueDetailPage {
     try {
       await createComment(this.issueId, text);
       this.commentDraft = '';
+      this.commentComposerExpanded = false;
       this.comments?.refetch();
     } catch (err) {
       this.commentError = err instanceof Error ? err.message : 'Failed to post comment';
@@ -160,6 +200,11 @@ export struct IssueDetailPage {
   private cancelEditing(): void {
     this.editingCommentId = '';
     this.editingDraft = '';
+  }
+
+  private collapseCommentComposer(): void {
+    if (this.commentDraft.trim().length > 0 || this.sendingComment) return;
+    this.commentComposerExpanded = false;
   }
 
   private issueState() {
@@ -231,7 +276,11 @@ export struct IssueDetailPage {
     return 'Owner';
   }
 
-  private commentAuthorName(c: Comment, issue: Issue | undefined): string {
+  private issueActorRenderKey(issue: Issue): string {
+    return `${issue.id}:${this.issueActorLabel(issue)}:${this.issueActorName(issue)}:${this.issueActorAvatar(issue)}`;
+  }
+
+  private resolveCommentAuthorName(c: Comment, issue: Issue | undefined): string {
     if (c.author_name && c.author_name.trim().length > 0) return c.author_name;
     const resolved = this.actorName(c.author_type ?? null, c.author_id);
     if (resolved) return resolved;
@@ -246,7 +295,7 @@ export struct IssueDetailPage {
     return 'Unknown';
   }
 
-  private commentAuthorAvatar(c: Comment, issue: Issue | undefined): string {
+  private resolveCommentAuthorAvatar(c: Comment, issue: Issue | undefined): string {
     if (c.author_avatar_url && c.author_avatar_url.trim().length > 0) return c.author_avatar_url;
     const resolved = this.actorAvatar(c.author_type ?? null, c.author_id);
     if (resolved) return resolved;
@@ -255,12 +304,36 @@ export struct IssueDetailPage {
     return '';
   }
 
+  private commentAuthorName(c: Comment, issue: Issue | undefined): string {
+    const displayComment = c as DisplayComment;
+    const result = displayComment.display_author_name ?? this.resolveCommentAuthorName(c, issue);
+    this.debugInfo('commentAuthorName',
+      `commentId=${c.id} authorType=${c.author_type ?? 'null'} authorId=${c.author_id} authorName=${c.author_name ?? '<null>'} result=${result}`);
+    return result;
+  }
+
+  private commentAuthorAvatar(c: Comment, issue: Issue | undefined): string {
+    const displayComment = c as DisplayComment;
+    const result = displayComment.display_author_avatar_url ?? this.resolveCommentAuthorAvatar(c, issue);
+    this.debugInfo('commentAuthorAvatar',
+      `commentId=${c.id} authorType=${c.author_type ?? 'null'} authorId=${c.author_id} authorAvatar=${c.author_avatar_url ?? '<null>'} result=${result || '<empty>'}`);
+    return result;
+  }
+
   private actorName(type: string | null, id: string | null | undefined): string {
-    if (!type || !id) return '';
+    if (!type || !id) {
+      this.debugInfo('actorName:skip', `type=${type ?? 'null'} id=${id ?? 'null'}`);
+      return '';
+    }
     if (type === 'agent') {
       const agents = this.agents?.getState().data;
-      if (!agents) return '';
+      const count = agents ? agents.length : -1;
+      if (!agents) {
+        this.debugInfo('actorName:agent-no-data', `id=${id} count=${count}`);
+        return '';
+      }
       const found = agents.find((agent: Agent) => agent.id === id);
+      this.debugInfo('actorName:agent', `id=${id} count=${count} found=${found ? 'yes' : 'no'} name=${found?.name ?? '<empty>'}`);
       return found ? found.name : '';
     }
     if (type === 'member') {
@@ -416,41 +489,43 @@ export struct IssueDetailPage {
       }
 
       Column() {
-        Card({ scheme: this.scheme, contentPadding: space('4') }) {
-          Column({ space: space('3') }) {
-            Row() {
-              Avatar({ name: this.issueActorName(issue), url: this.issueActorAvatar(issue), avatarSize: 36, scheme: this.scheme })
-              Column({ space: space('0.5') }) {
-                MulticaText({
-                  value: this.issueActorLabel(issue),
-                  scheme: this.scheme,
-                  textSize: 'xs',
-                  color: 'mutedForeground',
-                  weight: 'medium'
-                })
-                MulticaText({
-                  value: this.issueActorName(issue),
-                  scheme: this.scheme,
-                  textSize: 'sm',
-                  color: 'foreground',
-                  weight: 'medium'
-                })
+        ForEach([this.issueActorRenderKey(issue)], (_actorKey: string) => {
+          Card({ scheme: this.scheme, contentPadding: space('4') }) {
+            Column({ space: space('3') }) {
+              Row() {
+                Avatar({ name: this.issueActorName(issue), url: this.issueActorAvatar(issue), avatarSize: 36, scheme: this.scheme })
+                Column({ space: space('0.5') }) {
+                  MulticaText({
+                    value: this.issueActorLabel(issue),
+                    scheme: this.scheme,
+                    textSize: 'xs',
+                    color: 'mutedForeground',
+                    weight: 'medium'
+                  })
+                  MulticaText({
+                    value: this.issueActorName(issue),
+                    scheme: this.scheme,
+                    textSize: 'sm',
+                    color: 'foreground',
+                    weight: 'medium'
+                  })
+                }
+                .margin({ left: space('3') })
+                .alignItems(HorizontalAlign.Start)
+                Blank()
               }
-              .margin({ left: space('3') })
-              .alignItems(HorizontalAlign.Start)
-              Blank()
-            }
 
-            MulticaText({
-              value: `Created ${timeAgo(issue.created_at)} · Updated ${timeAgo(issue.updated_at)}`,
-              scheme: this.scheme,
-              textSize: 'xs',
-              color: 'mutedForeground'
-            })
+              MulticaText({
+                value: `Created ${timeAgo(issue.created_at)} · Updated ${timeAgo(issue.updated_at)}`,
+                scheme: this.scheme,
+                textSize: 'xs',
+                color: 'mutedForeground'
+              })
+            }
+            .width('100%')
+            .alignItems(HorizontalAlign.Start)
           }
-          .width('100%')
-          .alignItems(HorizontalAlign.Start)
-        }
+        }, (actorKey: string) => actorKey)
       }
       .margin({ top: space('4') })
       .width('100%')
@@ -496,7 +571,7 @@ export struct IssueDetailPage {
       Column({ space: space('3') }) {
         ForEach(this._comments!, (c: Comment) => {
           this.CommentRow(c)
-        })
+        }, (c: Comment) => `${c.id}:${this.commentAuthorName(c, this._issue)}:${this.commentAuthorAvatar(c, this._issue)}`)
       }
       .width('100%')
       .margin({ top: space('3') })
@@ -520,95 +595,95 @@ export struct IssueDetailPage {
   @Builder CommentRow(c: Comment) {
     Column() {
       Card({ scheme: this.scheme, contentPadding: space('4') }) {
-        Row() {
-          Avatar({ name: this.commentAuthorName(c, this._issue), url: this.commentAuthorAvatar(c, this._issue), avatarSize: 36, scheme: this.scheme })
-          Column({ space: space('2') }) {
+        Column({ space: space('2') }) {
+          Row() {
+            Avatar({ name: this.commentAuthorName(c, this._issue), url: this.commentAuthorAvatar(c, this._issue), avatarSize: 36, scheme: this.scheme })
+            Column({ space: space('0.5') }) {
+              MulticaText({
+                value: this.commentAuthorName(c, this._issue),
+                scheme: this.scheme,
+                textSize: 'sm',
+                weight: 'semibold',
+                color: 'foreground'
+              })
+              MulticaText({
+                value: timeAgo(c.created_at),
+                scheme: this.scheme,
+                textSize: 'xs',
+                color: 'mutedForeground'
+              })
+            }
+            .layoutWeight(1)
+            .margin({ left: space('3') })
+            .alignItems(HorizontalAlign.Start)
+          }
+          .width('100%')
+          .alignItems(VerticalAlign.Top)
+
+          if (this.editingCommentId === c.id) {
+            TextArea({ text: this.editingDraft })
+              .placeholderColor(String(themeTokens(this.scheme).mutedForeground))
+              .fontColor(String(themeTokens(this.scheme).foreground))
+              .backgroundColor(String(themeTokens(this.scheme).background))
+              .borderRadius(RADIUS.md)
+              .padding(space('3'))
+              .width('100%')
+              .height(96)
+              .onChange((value: string) => { this.editingDraft = value; })
             Row() {
-              Column({ space: space('0.5') }) {
+              MulticaButton({
+                label: this.savingEdit ? 'Saving…' : 'Save',
+                scheme: this.scheme,
+                variant: 'primary',
+                buttonSize: 'sm',
+                disabled: this.savingEdit || this.editingDraft.trim().length === 0,
+                onTap: () => { void this.saveEdit(); }
+              })
+              MulticaButton({
+                label: 'Cancel',
+                scheme: this.scheme,
+                variant: 'ghost',
+                buttonSize: 'sm',
+                onTap: () => { this.cancelEditing(); }
+              })
+                .margin({ left: space('2') })
+            }
+          } else {
+            MarkdownText({
+              value: this.commentBody(c),
+              scheme: this.scheme,
+              compact: true
+            })
+              .width('100%')
+
+            if (c.author_id === authStore.getState().user?.id) {
+              Row() {
                 MulticaText({
-                  value: this.commentAuthorName(c, this._issue),
-                  scheme: this.scheme,
-                  textSize: 'sm',
-                  weight: 'semibold',
-                  color: 'foreground'
-                })
-                MulticaText({
-                  value: timeAgo(c.created_at),
+                  value: 'Edit',
                   scheme: this.scheme,
                   textSize: 'xs',
-                  color: 'mutedForeground'
+                  weight: 'medium',
+                  color: 'brand'
                 })
-              }
-              .alignItems(HorizontalAlign.Start)
-              Blank()
-            }
-
-            if (this.editingCommentId === c.id) {
-              TextArea({ text: this.editingDraft })
-                .placeholderColor(String(themeTokens(this.scheme).mutedForeground))
-                .fontColor(String(themeTokens(this.scheme).foreground))
-                .backgroundColor(String(themeTokens(this.scheme).background))
-                .borderRadius(RADIUS.md)
-                .padding(space('3'))
-                .width('100%')
-                .height(96)
-                .onChange((value: string) => { this.editingDraft = value; })
-              Row() {
-                MulticaButton({
-                  label: this.savingEdit ? 'Saving…' : 'Save',
+                  .onClick(() => { this.startEditing(c); })
+                MulticaText({
+                  value: 'Delete',
                   scheme: this.scheme,
-                  variant: 'primary',
-                  buttonSize: 'sm',
-                  disabled: this.savingEdit || this.editingDraft.trim().length === 0,
-                  onTap: () => { void this.saveEdit(); }
+                  textSize: 'xs',
+                  weight: 'medium',
+                  color: 'destructive'
                 })
-                MulticaButton({
-                  label: 'Cancel',
-                  scheme: this.scheme,
-                  variant: 'ghost',
-                  buttonSize: 'sm',
-                  onTap: () => { this.cancelEditing(); }
-                })
-                  .margin({ left: space('2') })
+                  .margin({ left: space('4') })
+                  .onClick(() => { void this.removeComment(c); })
               }
-            } else {
-              MarkdownText({
-                value: this.commentBody(c),
-                scheme: this.scheme,
-                compact: true
-              })
-                .width('100%')
-
-              if (c.author_id === authStore.getState().user?.id) {
-                Row() {
-                  MulticaText({
-                    value: 'Edit',
-                    scheme: this.scheme,
-                    textSize: 'xs',
-                    weight: 'medium',
-                    color: 'brand'
-                  })
-                    .onClick(() => { this.startEditing(c); })
-                  MulticaText({
-                    value: 'Delete',
-                    scheme: this.scheme,
-                    textSize: 'xs',
-                    weight: 'medium',
-                    color: 'destructive'
-                  })
-                    .margin({ left: space('4') })
-                    .onClick(() => { void this.removeComment(c); })
-                }
-              }
+              .margin({ top: space('1') })
             }
           }
-          .layoutWeight(1)
-          .margin({ left: space('3') })
-          .alignItems(HorizontalAlign.Start)
         }
         .width('100%')
         .constraintSize({ minHeight: COMMENT_ROW_MIN_HEIGHT })
-        .alignItems(VerticalAlign.Top)
+        .padding({ right: space('1') })
+        .alignItems(HorizontalAlign.Start)
       }
     }
     .width('100%')
@@ -616,20 +691,26 @@ export struct IssueDetailPage {
 
   @Builder Composer() {
     Column() {
-      Column({ space: space('2') }) {
-        if (this.commentError) {
-          MulticaText({
-            value: this.commentError,
-            scheme: this.scheme,
-            textSize: 'sm',
-            color: 'destructive'
-          })
-            .width('100%')
-        }
+      if (this.commentError) {
+        MulticaText({
+          value: this.commentError,
+          scheme: this.scheme,
+          textSize: 'sm',
+          color: 'destructive'
+        })
+          .width('100%')
+          .padding({ left: space('4'), right: space('4'), top: space('2') })
+      }
 
-        Column() {
-          Card({ scheme: this.scheme, contentPadding: space('3') }) {
-            Column({ space: space('2.5') }) {
+      Column() {
+        Card({
+          scheme: this.scheme,
+          contentPadding: this.commentComposerExpanded || this.commentDraft.trim().length > 0 ? space('3') : space('2.5')
+        }) {
+          Column({
+            space: this.commentComposerExpanded || this.commentDraft.trim().length > 0 ? space('2.5') : space('2')
+          }) {
+            if (this.commentComposerExpanded || this.commentDraft.trim().length > 0) {
               Row() {
                 MulticaText({
                   value: 'Comment',
@@ -639,6 +720,17 @@ export struct IssueDetailPage {
                   color: 'foreground'
                 })
                 Blank()
+                if (!this.sendingComment && this.commentDraft.trim().length === 0) {
+                  MulticaText({
+                    value: 'Close',
+                    scheme: this.scheme,
+                    textSize: 'xs',
+                    weight: 'medium',
+                    color: 'mutedForeground'
+                  })
+                    .onClick(() => { this.collapseCommentComposer(); })
+                    .margin({ right: space('3') })
+                }
                 MulticaText({
                   value: `${this.commentDraft.length}/${COMMENT_MAX_LENGTH}`,
                   scheme: this.scheme,
@@ -647,21 +739,36 @@ export struct IssueDetailPage {
                 })
               }
               .width('100%')
+            }
 
-              TextArea({ placeholder: 'Write a comment…', text: this.commentDraft })
-                .placeholderColor(String(themeTokens(this.scheme).mutedForeground))
-                .fontColor(String(themeTokens(this.scheme).foreground))
-                .caretColor(String(themeTokens(this.scheme).brand))
-                .backgroundColor(String(themeTokens(this.scheme).card))
-                .borderRadius(RADIUS.lg)
-                .padding(space('3'))
-                .width('100%')
-                .height(COMMENT_BOX_HEIGHT)
-                .maxLength(COMMENT_MAX_LENGTH)
-                .barState(BarState.Auto)
-                .showCounter(true, { thresholdPercentage: 80, highlightBorder: true })
-                .onChange((value: string) => { this.commentDraft = value; })
+            TextArea({ placeholder: 'Write a comment…', text: this.commentDraft })
+              .placeholderColor(String(themeTokens(this.scheme).mutedForeground))
+              .fontColor(String(themeTokens(this.scheme).foreground))
+              .caretColor(String(themeTokens(this.scheme).brand))
+              .backgroundColor(String(themeTokens(this.scheme).card))
+              .borderRadius(RADIUS.lg)
+              .padding({
+                left: space('3'),
+                right: space('3'),
+                top: this.commentComposerExpanded || this.commentDraft.trim().length > 0 ? space('3') : space('2.5'),
+                bottom: this.commentComposerExpanded || this.commentDraft.trim().length > 0 ? space('3') : space('2.5')
+              })
+              .width('100%')
+              .height(this.commentComposerExpanded || this.commentDraft.trim().length > 0 ? COMMENT_BOX_HEIGHT : COMMENT_BOX_COLLAPSED_HEIGHT)
+              .maxLength(COMMENT_MAX_LENGTH)
+              .barState(BarState.Auto)
+              .showCounter(this.commentComposerExpanded || this.commentDraft.trim().length > 0, {
+                thresholdPercentage: 80,
+                highlightBorder: true
+              })
+              .onClick(() => { this.commentComposerExpanded = true; })
+              .onChange((value: string) => {
+                this.commentDraft = value;
+                if (value.trim().length > 0) this.commentComposerExpanded = true;
+              })
+              .onBlur(() => { this.collapseCommentComposer(); })
 
+            if (this.commentComposerExpanded || this.commentDraft.trim().length > 0) {
               Row() {
                 MulticaText({
                   value: 'Supports multiline input',
@@ -682,20 +789,25 @@ export struct IssueDetailPage {
               .width('100%')
               .alignItems(VerticalAlign.Center)
             }
-            .width('100%')
-            .alignItems(HorizontalAlign.Start)
           }
+          .width('100%')
+          .alignItems(HorizontalAlign.Start)
         }
-        .width('100%')
       }
+      .width('100%')
+      .padding({
+        left: space('4'),
+        right: space('4'),
+        top: this.commentComposerExpanded || this.commentDraft.trim().length > 0 ? space('3') : space('2'),
+        bottom: this.commentComposerExpanded || this.commentDraft.trim().length > 0 ? space('4') : space('2')
+      })
+      .backgroundColor(String(themeTokens(this.scheme).background))
+      .border({
+        width: { top: 1 },
+        color: String(themeTokens(this.scheme).border)
+      })
     }
     .width('100%')
-    .padding({ left: space('4'), right: space('4'), top: space('3'), bottom: space('4') })
-    .backgroundColor(String(themeTokens(this.scheme).background))
-    .border({
-      width: { top: 1 },
-      color: String(themeTokens(this.scheme).border)
-    })
   }
 
   @Builder AttributeChip(value: string, kind: 'status' | 'priority') {

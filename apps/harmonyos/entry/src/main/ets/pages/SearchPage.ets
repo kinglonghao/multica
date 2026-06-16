@@ -1,10 +1,9 @@
 import { appNavigation, navParam } from '../data/navigation';
 import { api } from '../data/api';
 import { Issue, Project } from '../models/types';
-import { THEME, ColorScheme, SPACE, RADIUS, space, themeTokens } from '../lib/theme';
+import { ColorScheme, RADIUS, space, themeTokens } from '../lib/theme';
+import { detectSystemColorScheme } from '../lib/theme-manager';
 import { MulticaText } from '../components/ui/Text';
-import { Header } from '../components/ui/Header';
-import { IconButton } from '../components/ui/IconButton';
 import { IssueRow } from '../components/issue/IssueRow';
 import { ProjectRow } from '../components/project/ProjectRow';
 
@@ -37,8 +36,8 @@ export struct SearchPage {
     void this.loadPins();
   }
 
-  private detectScheme(): ColorScheme {
-    return 'light';
+    private detectScheme(): ColorScheme {
+    return detectSystemColorScheme();
   }
 
   private onQuery(value: string): void {
@@ -100,32 +99,22 @@ export struct SearchPage {
 
   build() {
     Column() {
-      Header({
-        title: 'Search',
-        scheme: this.scheme,
-        left: this.BackButton()
-      })
-
       Row() {
         this.Tab('issues', 'Issues')
         this.Tab('projects', 'Projects')
         this.Tab('pins', 'Pinned')
       }
       .width('100%')
-      .padding(space('2'))
-      .border({
-        width: { bottom: 1 },
-        color: String(themeTokens(this.scheme).border)
-      })
+      .padding({ left: space('3'), right: space('3'), top: space('3') })
 
-      TextInput({ placeholder: 'Search…', text: this.query })
+      TextInput({ placeholder: 'Search...', text: this.query })
         .placeholderColor(String(themeTokens(this.scheme).mutedForeground))
         .fontColor(String(themeTokens(this.scheme).foreground))
-        .backgroundColor(String(themeTokens(this.scheme).card))
+        .backgroundColor(String(themeTokens(this.scheme).background))
         .borderRadius(RADIUS.md)
-        .padding(space('3'))
+        .padding({ left: space('3'), right: space('3'), top: space('2.5'), bottom: space('2.5') })
         .width('100%')
-        .margin({ top: space('3'), left: space('4'), right: space('4') })
+        .margin({ top: space('3'), left: space('3'), right: space('3') })
         .onChange((value: string) => { this.onQuery(value); })
 
       if (this.tab === 'issues') {
@@ -173,43 +162,45 @@ export struct SearchPage {
         .layoutWeight(1)
         .width('100%')
       } else {
-        Column() {
+        List({ space: 0 }) {
           ForEach(this.pins, (pin: PinRow) => {
-            Row() {
-              MulticaText({
-                value: pin.label,
-                scheme: this.scheme,
-                textSize: 'base',
-                color: 'foreground'
-              })
-              Blank()
-              MulticaText({
-                value: pin.sub,
-                scheme: this.scheme,
-                textSize: 'xs',
-                color: 'mutedForeground'
-              })
+            ListItem() {
+              Row() {
+                MulticaText({
+                  value: pin.label,
+                  scheme: this.scheme,
+                  textSize: 'sm',
+                  color: 'foreground'
+                })
+                Blank()
+                MulticaText({
+                  value: pin.sub,
+                  scheme: this.scheme,
+                  textSize: 'xs',
+                  color: 'mutedForeground'
+                })
+              }
+              .width('100%')
+              .padding({ left: space('3'), right: space('3'), top: space('3'), bottom: space('3') })
             }
-            .width('100%')
-            .padding(space('4'))
-            .border({
-              width: { bottom: 1 },
-              color: String(themeTokens(this.scheme).border)
-            })
           })
-          if (this.pins.length === 0) {
-            MulticaText({
-              value: 'No pinned items yet',
-              scheme: this.scheme,
-              textSize: 'sm',
-              color: 'mutedForeground',
-              textAlign: 'center'
-            })
-              .padding(space('6'))
-          }
         }
         .layoutWeight(1)
         .width('100%')
+        .padding({ left: space('3'), right: space('3'), top: space('3') })
+        .divider(null)
+        .backgroundColor(String(themeTokens(this.scheme).background))
+
+        if (this.pins.length === 0) {
+          MulticaText({
+            value: 'No pinned items yet',
+            scheme: this.scheme,
+            textSize: 'sm',
+            color: 'mutedForeground',
+            textAlign: 'center'
+          })
+            .padding(space('6'))
+        }
       }
     }
     .width('100%')
@@ -223,7 +214,7 @@ export struct SearchPage {
         value: label,
         scheme: this.scheme,
         textSize: 'sm',
-        weight: this.tab === name ? 'medium' : 'normal',
+        weight: this.tab === name ? 'semibold' : 'normal',
         color: this.tab === name ? 'foreground' : 'mutedForeground'
       })
     }
@@ -234,14 +225,5 @@ export struct SearchPage {
     .justifyContent(FlexAlign.Center)
     .alignItems(VerticalAlign.Center)
     .onClick(() => { this.tab = name; })
-  }
-
-  @Builder BackButton() {
-    IconButton({
-      glyph: '‹',
-      scheme: this.scheme,
-      accessibilityLabel: 'Back',
-      onTap: () => { appNavigation.pop(); }
-    })
   }
 }

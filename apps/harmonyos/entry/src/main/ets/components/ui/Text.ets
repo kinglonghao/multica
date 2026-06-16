@@ -12,6 +12,29 @@ function resolveTextAlign(value: 'start' | 'center' | 'end'): TextAlign {
   }
 }
 
+function resolveLineHeight(value: 'xs' | 'sm' | 'base' | 'md' | 'lg' | 'xl' | '2xl' | '3xl'): number {
+  switch (value) {
+    case 'xs':
+      return 16;
+    case 'sm':
+      return 20;
+    case 'base':
+      return 24;
+    case 'md':
+      return 22;
+    case 'lg':
+      return 26;
+    case 'xl':
+      return 30;
+    case '2xl':
+      return 34;
+    case '3xl':
+      return 40;
+    default:
+      return 24;
+  }
+}
+
 @ComponentV2
 export struct MulticaText {
   @Param value: string = '';
@@ -29,6 +52,7 @@ export struct MulticaText {
       .fontWeight(fontWeight(this.weight))
       .fontColor(textColor(this.scheme, this.color))
       .textAlign(resolveTextAlign(this.textAlign))
+      .lineHeight(resolveLineHeight(this.textSize))
       .maxLines(this.maxLines > 0 ? this.maxLines : 1000000)
       .textOverflow(this.overflow === 'ellipsis' ? { overflow: TextOverflow.Ellipsis } : { overflow: TextOverflow.Clip })
   }

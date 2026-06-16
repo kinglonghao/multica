@@ -2,9 +2,9 @@ import { workspaceStore } from '../data/workspace';
 import { api } from '../data/api';
 import { useQuery, QueryHandle, FetchContext, queryClient } from '../queries/cache';
 import { Agent } from '../models/types';
-import { THEME, ColorScheme, SPACE, RADIUS, space, themeTokens } from '../lib/theme';
+import { ColorScheme, RADIUS, space, themeTokens } from '../lib/theme';
+import { detectSystemColorScheme } from '../lib/theme-manager';
 import { MulticaText } from '../components/ui/Text';
-import { Header } from '../components/ui/Header';
 import { Avatar } from '../components/ui/Avatar';
 import { Skeleton } from '../components/ui/Skeleton';
 
@@ -36,8 +36,8 @@ export struct AgentsPage {
     this.globalUnsub?.();
   }
 
-  private detectScheme(): ColorScheme {
-    return 'light';
+    private detectScheme(): ColorScheme {
+    return detectSystemColorScheme();
   }
 
   private syncFromCache(): void {
@@ -50,25 +50,24 @@ export struct AgentsPage {
 
   build() {
     Column() {
-      Header({ title: 'Agents', scheme: this.scheme })
-
       if (this._isLoading) {
         Column() {
           ForEach([1, 2, 3], () => {
             Row() {
-              Skeleton({ scheme: this.scheme, skeletonWidth: 40, skeletonHeight: 40, radius: 20 })
+              Skeleton({ scheme: this.scheme, skeletonWidth: 36, skeletonHeight: 36, radius: 18 })
               Column() {
-                Skeleton({ scheme: this.scheme, skeletonWidth: '50%', skeletonHeight: 14, radius: 4 })
-                Skeleton({ scheme: this.scheme, skeletonWidth: '80%', skeletonHeight: 12, radius: 4 })
-                  .margin({ top: space('1.5') })
+                Skeleton({ scheme: this.scheme, skeletonWidth: '50%', skeletonHeight: 12, radius: 4 })
+                Skeleton({ scheme: this.scheme, skeletonWidth: '78%', skeletonHeight: 10, radius: 4 })
+                  .margin({ top: space('1') })
               }
               .layoutWeight(1)
-              .margin({ left: space('3') })
+              .margin({ left: space('2.5') })
               .alignItems(HorizontalAlign.Start)
             }
-            .padding(space('4'))
+            .padding({ left: space('3'), right: space('3'), top: space('3'), bottom: space('3') })
           })
         }
+        .layoutWeight(1)
       } else if (this._error) {
         MulticaText({
           value: `Failed to load agents: ${this._error.message}`,
@@ -82,12 +81,12 @@ export struct AgentsPage {
           ForEach(this._data ?? [], (agent: Agent) => {
             ListItem() {
               Row() {
-                Avatar({ name: agent.name, url: agent.avatar_url ?? '', avatarSize: 40, scheme: this.scheme })
+                Avatar({ name: agent.name, url: agent.avatar_url ?? '', avatarSize: 36, scheme: this.scheme })
                 Column() {
                   MulticaText({
                     value: agent.name,
                     scheme: this.scheme,
-                    textSize: 'base',
+                    textSize: 'sm',
                     weight: 'medium',
                     color: 'foreground'
                   })
@@ -100,11 +99,11 @@ export struct AgentsPage {
                       maxLines: 1,
                       overflow: 'ellipsis'
                     })
-                      .margin({ top: space('0.5') })
+                      .margin({ top: 2 })
                   }
                 }
                 .layoutWeight(1)
-                .margin({ left: space('3') })
+                .margin({ left: space('2.5') })
                 .alignItems(HorizontalAlign.Start)
 
                 MulticaText({
@@ -115,7 +114,7 @@ export struct AgentsPage {
                 })
               }
               .width('100%')
-              .padding(space('4'))
+              .padding({ left: space('3'), right: space('3'), top: space('3'), bottom: space('3') })
               .border({
                 width: { bottom: 1 },
                 color: String(themeTokens(this.scheme).border)

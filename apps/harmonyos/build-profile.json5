@@ -1,6 +1,20 @@
 {
   "app": {
-    "signingConfigs": [],
+    "signingConfigs": [
+      {
+        "name": "default",
+        "type": "HarmonyOS",
+        "material": {
+          "certpath": "/Users/kinglong/.ohos/config/default_harmonyos_VZ4DKAR7Oad-zhXlO74HzgVn2aV8ifZiXLB8gyMkSBk=.cer",
+          "keyAlias": "debugKey",
+          "keyPassword": "00000019C2A98AA7C09A3261E2B0423D35056588B1A25C1D0D6459857227A001614A3F61A36EF1CF77",
+          "profile": "/Users/kinglong/.ohos/config/default_harmonyos_VZ4DKAR7Oad-zhXlO74HzgVn2aV8ifZiXLB8gyMkSBk=.p7b",
+          "signAlg": "SHA256withECDSA",
+          "storeFile": "/Users/kinglong/.ohos/config/default_harmonyos_VZ4DKAR7Oad-zhXlO74HzgVn2aV8ifZiXLB8gyMkSBk=.p12",
+          "storePassword": "00000019210014CE56CB7D44DE7FC764BA12A50609087EA2BAA2E58C62EBEB3CFE8F248FFDBF6A0C0A"
+        }
+      }
+    ],
     "products": [
       {
         "name": "default",
@@ -16,8 +30,12 @@
       }
     ],
     "buildModeSet": [
-      { "name": "debug" },
-      { "name": "release" }
+      {
+        "name": "debug"
+      },
+      {
+        "name": "release"
+      }
     ]
   },
   "modules": [
@@ -27,7 +45,9 @@
       "targets": [
         {
           "name": "default",
-          "applyToProducts": ["default"]
+          "applyToProducts": [
+            "default"
+          ]
         }
       ]
     }

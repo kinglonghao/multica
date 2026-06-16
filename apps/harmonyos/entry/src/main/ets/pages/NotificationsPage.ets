@@ -2,10 +2,9 @@ import { appNavigation } from '../data/navigation';
 import { api } from '../data/api';
 import { useQuery, QueryHandle, FetchContext, queryClient } from '../queries/cache';
 import { NotificationPreferences, NotificationPreference } from '../models/types';
-import { THEME, ColorScheme, SPACE, RADIUS, space, themeTokens } from '../lib/theme';
+import { ColorScheme, RADIUS, space, themeTokens } from '../lib/theme';
+import { detectSystemColorScheme } from '../lib/theme-manager';
 import { MulticaText } from '../components/ui/Text';
-import { Header } from '../components/ui/Header';
-import { IconButton } from '../components/ui/IconButton';
 import { Skeleton } from '../components/ui/Skeleton';
 import { MulticaButton } from '../components/ui/Button';
 
@@ -64,8 +63,8 @@ export struct NotificationsPage {
     if (s.data) this.prefs = [...s.data.preferences];
   }
 
-  private detectScheme(): ColorScheme {
-    return 'light';
+    private detectScheme(): ColorScheme {
+    return detectSystemColorScheme();
   }
 
   /** Toggle handler — produces a NEW prefs array (immutable), and
@@ -116,21 +115,16 @@ export struct NotificationsPage {
 
   build() {
     Column() {
-      Header({
-        title: 'Notifications',
-        scheme: this.scheme,
-        left: this.BackButton(),
-        right: this.SaveButton()
-      })
-
       if (this._isLoading) {
         Column() {
           ForEach([1, 2, 3, 4], () => {
-            Skeleton({ scheme: this.scheme, skeletonWidth: '90%', skeletonHeight: 56, radius: 8 })
-              .margin({ top: space('3') })
+            Skeleton({ scheme: this.scheme, skeletonWidth: '100%', skeletonHeight: 48, radius: RADIUS.lg })
+              .margin({ top: space('2') })
           })
         }
-        .padding(space('4'))
+        .layoutWeight(1)
+        .padding({ left: space('3'), right: space('3'), top: space('3') })
+        .width('100%')
       } else if (this._error) {
         MulticaText({
           value: `Failed to load notification preferences: ${this._error.message}`,
@@ -140,90 +134,90 @@ export struct NotificationsPage {
         })
           .padding(space('4'))
       } else {
-        Column() {
-          // Render from this.prefs (immutable snapshot), not the cache
-          // array directly. The cache's array reference may stay the
-          // same across toggles — using it as the render source would
-          // prevent the toggle UI from refreshing.
+        List({ space: 0 }) {
           ForEach(this.prefs, (pref: NotificationPreference, index?: number) => {
-            Row() {
-              Column() {
-                MulticaText({
-                  value: pref.category,
-                  scheme: this.scheme,
-                  textSize: 'base',
-                  weight: 'medium',
-                  color: 'foreground'
-                })
-                MulticaText({
-                  value: pref.channel,
-                  scheme: this.scheme,
-                  textSize: 'xs',
-                  color: 'mutedForeground'
-                })
-                  .margin({ top: space('0.5') })
+            ListItem() {
+              Row() {
+                Column() {
+                  MulticaText({
+                    value: pref.category,
+                    scheme: this.scheme,
+                    textSize: 'sm',
+                    weight: 'medium',
+                    color: 'foreground'
+                  })
+                  MulticaText({
+                    value: pref.channel,
+                    scheme: this.scheme,
+                    textSize: 'xs',
+                    color: 'mutedForeground'
+                  })
+                    .margin({ top: 2 })
+                }
+                .layoutWeight(1)
+                .alignItems(HorizontalAlign.Start)
+
+                Toggle({ type: ToggleType.Switch, isOn: pref.enabled })
+                  .onChange((isOn: boolean) => {
+                    this.togglePref(index ?? 0, isOn);
+                  })
               }
-              .layoutWeight(1)
-              .alignItems(HorizontalAlign.Start)
-
-              Toggle({ type: ToggleType.Switch, isOn: pref.enabled })
-                .onChange((isOn: boolean) => {
-                  this.togglePref(index ?? 0, isOn);
-                })
-            }
-            .width('100%')
-            .padding(space('4'))
-            .backgroundColor(String(themeTokens(this.scheme).card))
-            .borderRadius(RADIUS.md)
-            .margin({ top: space('2') })
-          })
-
-          if (this.errorMessage) {
-            MulticaText({
-              value: this.errorMessage,
-              scheme: this.scheme,
-              textSize: 'sm',
-              color: 'destructive'
-            })
-              .margin({ top: space('2') })
               .width('100%')
-          }
-
-          if (this.success) {
-            MulticaText({
-              value: 'Saved',
-              scheme: this.scheme,
-              textSize: 'sm',
-              color: 'success'
-            })
-              .margin({ top: space('2') })
-          }
+              .padding({ left: space('3'), right: space('3'), top: space('3'), bottom: space('3') })
+              .onClick(() => {
+                this.togglePref(index ?? 0, !pref.enabled);
+              })
+            }
+          })
         }
-        .padding(space('4'))
+        .layoutWeight(1)
+        .width('100%')
+        .padding({ left: space('3'), right: space('3'), top: space('3') })
+        .divider(null)
+        .backgroundColor(String(themeTokens(this.scheme).background))
       }
+
+      if (this.errorMessage) {
+        MulticaText({
+          value: this.errorMessage,
+          scheme: this.scheme,
+          textSize: 'xs',
+          color: 'destructive'
+        })
+          .width('100%')
+          .padding({ left: space('3'), right: space('3'), top: space('2') })
+      }
+
+      if (this.success) {
+        MulticaText({
+          value: 'Saved',
+          scheme: this.scheme,
+          textSize: 'xs',
+          color: 'success'
+        })
+          .width('100%')
+          .padding({ left: space('3'), right: space('3'), top: space('2') })
+      }
+
+      Row() {
+        MulticaButton({
+          label: this.saving ? 'Saving...' : 'Save',
+          scheme: this.scheme,
+          variant: 'primary',
+          fullWidth: true,
+          disabled: this.saving,
+          onTap: () => { void this.save(); }
+        })
+      }
+      .width('100%')
+      .padding({ left: space('3'), right: space('3'), top: space('2'), bottom: space('3') })
+      .border({
+        width: { top: 1 },
+        color: String(themeTokens(this.scheme).border)
+      })
     }
     .width('100%')
     .height('100%')
     .backgroundColor(String(themeTokens(this.scheme).background))
-  }
-
-  @Builder BackButton() {
-    IconButton({
-      glyph: '‹',
-      scheme: this.scheme,
-      accessibilityLabel: 'Back',
-      onTap: () => { appNavigation.pop(); }
-    })
-  }
-
-  @Builder SaveButton() {
-    MulticaButton({
-      label: this.saving ? 'Saving…' : 'Save',
-      scheme: this.scheme,
-      variant: 'primary',
-      buttonSize: 'sm',
-      disabled: this.saving,
-      onTap: () => { void this.save(); }
-    })
   }
 }
