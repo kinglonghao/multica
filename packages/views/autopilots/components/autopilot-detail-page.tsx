@@ -52,7 +52,12 @@ import {
   toCronExpression,
 } from "./trigger-config";
 import type { TriggerConfig } from "./trigger-config";
-import type { AutopilotExecutionMode, AutopilotRun, AutopilotTrigger } from "@multica/core/types";
+import type {
+  AutopilotExecutionMode,
+  AutopilotRun,
+  AutopilotSubscriber,
+  AutopilotTrigger,
+} from "@multica/core/types";
 import type { AgentTask } from "@multica/core/types/agent";
 import { ReadonlyContent } from "../../editor";
 import { TranscriptButton } from "../../common/task-transcript";
@@ -573,6 +578,40 @@ function AddTriggerDialog({
   );
 }
 
+// Read-only chip row; edits flow through AutopilotDialog → SubscriberMultiSelect
+// so the detail page never holds in-flight selection state.
+function SubscriberChips({
+  subscribers,
+}: {
+  subscribers: AutopilotSubscriber[] | undefined;
+}) {
+  const { t } = useT("autopilots");
+  const { getActorName } = useActorName();
+  const members = (subscribers ?? []).filter((s) => s.user_type === "member");
+  if (members.length === 0) {
+    return (
+      <div className="mt-1 text-sm text-muted-foreground">
+        {t(($) => $.detail.field_subscribers_none)}
+      </div>
+    );
+  }
+  return (
+    <div className="mt-1 flex flex-wrap gap-1.5">
+      {members.map((s) => (
+        <span
+          key={`${s.user_type}:${s.user_id}`}
+          className="inline-flex items-center gap-1 rounded-full border bg-background px-2 py-0.5 text-xs"
+        >
+          <ActorAvatar actorType="member" actorId={s.user_id} size={14} />
+          <span className="max-w-[14rem] truncate">
+            {getActorName("member", s.user_id)}
+          </span>
+        </span>
+      ))}
+    </div>
+  );
+}
+
 export function AutopilotDetailPage({ autopilotId }: { autopilotId: string }) {
   const { t } = useT("autopilots");
   const wsId = useWorkspaceId();
@@ -757,6 +796,24 @@ export function AutopilotDetailPage({ autopilotId }: { autopilotId: string }) {
                 </div>
               </div>
               <div>
+                <label className="text-xs text-muted-foreground">{t(($) => $.detail.field_created_by)}</label>
+                <div className="mt-1 flex items-center gap-2">
+                  {/* Creator may be a member or an agent: the HTTP create path stamps
+                      member today, but backend logic also writes created_by_type=agent.
+                      ActorAvatar/getActorName resolve both, so never assume member. */}
+                  <ActorAvatar
+                    actorType={autopilot.created_by_type}
+                    actorId={autopilot.created_by_id}
+                    size={20}
+                    enableHoverCard
+                    showStatusDot={autopilot.created_by_type === "agent"}
+                  />
+                  <span className="cursor-pointer">
+                    {getActorName(autopilot.created_by_type, autopilot.created_by_id)}
+                  </span>
+                </div>
+              </div>
+              <div>
                 <label className="text-xs text-muted-foreground">{t(($) => $.detail.field_output_mode)}</label>
                 <div className="mt-1">
                   {t(($) => $.execution_mode[autopilot.execution_mode as AutopilotExecutionMode])}
@@ -782,6 +839,16 @@ export function AutopilotDetailPage({ autopilotId }: { autopilotId: string }) {
                       <span className="text-muted-foreground">{t(($) => $.detail.project_unavailable)}</span>
                     )}
                   </div>
+                </div>
+              )}
+              {autopilot.execution_mode === "create_issue" && (
+                <div className="col-span-2">
+                  <label className="text-xs text-muted-foreground">
+                    {t(($) => $.detail.field_subscribers)}
+                  </label>
+                  <SubscriberChips
+                    subscribers={autopilot.subscribers}
+                  />
                 </div>
               )}
               {autopilot.description && (
@@ -882,6 +949,10 @@ export function AutopilotDetailPage({ autopilotId }: { autopilotId: string }) {
             assignee_type: autopilot.assignee_type,
             assignee_id: autopilot.assignee_id,
             execution_mode: autopilot.execution_mode as AutopilotExecutionMode,
+            subscriber_user_ids:
+              autopilot.subscribers
+                ?.filter((s) => s.user_type === "member")
+                .map((s) => s.user_id) ?? [],
           }}
           triggers={triggers}
         />

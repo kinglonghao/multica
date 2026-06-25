@@ -211,16 +211,37 @@ export function useCreateIssue() {
 export function useUpdateIssue() {
   const qc = useQueryClient();
   const wsId = useWorkspaceId();
+  // Every bucketed board cache an optimistic move must keep in sync: the
+  // workspace board (issueKeys.list*) AND the My-Issues / Project board
+  // (issueKeys.myList* under `my`), which share the ListIssuesCache shape.
+  // Filtering by `byStatus` skips the grouped (assignee) and flat
+  // (gantt/detail/children) caches that also live under those prefixes. The
+  // board reconciles local columns from its own feeding cache on settle, so a
+  // move that only patched the workspace cache would snap back on My-Issues /
+  // Project boards.
+  const readBucketedLists = () =>
+    [
+      ...qc.getQueriesData<ListIssuesCache>({ queryKey: issueKeys.list(wsId) }),
+      ...qc.getQueriesData<ListIssuesCache>({ queryKey: issueKeys.myAll(wsId) }),
+    ].filter(
+      (entry): entry is [QueryKey, ListIssuesCache] => !!entry[1]?.byStatus,
+    );
   return useMutation({
     mutationFn: ({ id, ...data }: { id: string } & UpdateIssueRequest) =>
       api.updateIssue(id, data),
     onMutate: ({ id, ...data }) => {
+      // suppress_run / handoff_note are write-time control fields, not Issue
+      // columns — they steer enqueue/injection on the server and must never be
+      // written into the query cache (MUL-3375). Strip them from the patch; the
+      // mutationFn above still sends the full payload to the API.
+      const { suppress_run: _suppressRun, handoff_note: _handoffNote, ...patch } = data;
       // Fire-and-forget cancelQueries — keeps onMutate synchronous so the
       // cache update happens in the same tick as mutate(). Awaiting would
       // yield to the event loop, letting @dnd-kit reset its visual state
       // before the optimistic update lands.
       qc.cancelQueries({ queryKey: issueKeys.list(wsId) });
-      const prevLists = qc.getQueriesData<ListIssuesCache>({ queryKey: issueKeys.list(wsId) });
+      qc.cancelQueries({ queryKey: issueKeys.myAll(wsId) });
+      const prevLists = readBucketedLists();
       const firstListData = prevLists[0]?.[1];
       const prevDetail = qc.getQueryData<Issue>(issueKeys.detail(wsId, id));
 
@@ -251,16 +272,16 @@ export function useUpdateIssue() {
         : undefined;
 
       for (const [key, cached] of prevLists) {
-        if (cached) qc.setQueryData<ListIssuesCache>(key, patchIssueInBuckets(cached, id, data));
+        if (cached) qc.setQueryData<ListIssuesCache>(key, patchIssueInBuckets(cached, id, patch));
       }
       qc.setQueryData<Issue>(issueKeys.detail(wsId, id), (old) =>
-        old ? { ...old, ...data } : old,
+        old ? { ...old, ...patch } : old,
       );
       if (parentId) {
         qc.setQueryData<Issue[]>(
           issueKeys.children(wsId, parentId),
           (old) =>
-            old?.map((c) => (c.id === id ? { ...c, ...data } : c)),
+            old?.map((c) => (c.id === id ? { ...c, ...patch } : c)),
         );
       }
       return { prevLists, prevDetail, prevChildren, parentId, id };
@@ -280,9 +301,29 @@ export function useUpdateIssue() {
         );
       }
     },
+    onSuccess: (serverIssue) => {
+      // Reconcile with the authoritative server entity by patching the one card
+      // in place — NOT by invalidating + refetching the list. The list refetch
+      // is what made a successful move flicker: the optimistic card was already
+      // in the right place, then the refetch replaced the whole column and the
+      // card re-landed. updateIssue returns the full issue and a position update
+      // touches only that row, so a surgical patch is the authoritative
+      // reconcile and is a visual no-op when the optimistic value matched.
+      for (const [key, cached] of readBucketedLists()) {
+        qc.setQueryData<ListIssuesCache>(
+          key,
+          patchIssueInBuckets(cached, serverIssue.id, serverIssue),
+        );
+      }
+      qc.setQueryData<Issue>(issueKeys.detail(wsId, serverIssue.id), (old) =>
+        old ? { ...old, ...serverIssue } : old,
+      );
+    },
     onSettled: (_data, _err, vars, ctx) => {
-      qc.invalidateQueries({ queryKey: issueKeys.detail(wsId, vars.id) });
-      qc.invalidateQueries({ queryKey: issueKeys.list(wsId) });
+      // The issue's own list + detail caches are reconciled surgically in
+      // onSuccess / onError, so they are deliberately NOT invalidated here — a
+      // full-list refetch on settle is what made drags flicker. Only aggregate
+      // caches that cannot be patched from a single issue are refreshed below.
       qc.invalidateQueries({ queryKey: issueKeys.assigneeGroupsAll(wsId) });
       qc.invalidateQueries({ queryKey: issueKeys.myAssigneeGroupsAll(wsId) });
       qc.invalidateQueries({ queryKey: issueKeys.projectGanttAll(wsId) });
@@ -408,12 +449,27 @@ export function useBatchUpdateIssues() {
       updates: UpdateIssueRequest;
     }) => api.batchUpdateIssues(ids, updates),
     onMutate: async ({ ids, updates }) => {
+      // Patch BOTH the workspace board (issueKeys.list) and the filtered
+      // My-Issues / Project / actor lists (issueKeys.myAll). The single-issue
+      // update already patches both; batch only touched issueKeys.list, so a
+      // batch edit on a My-Issues board had no optimistic effect and relied
+      // entirely on the settle refetch. Filter to bucketed (byStatus) caches so
+      // grouped/flat caches under the same prefix are skipped.
+      //
+      // Control fields steer the server; they are not Issue columns and must
+      // not enter the cache (MUL-3375). mutationFn still sends them.
+      const { suppress_run: _suppressRun, handoff_note: _handoffNote, ...patch } = updates;
       await qc.cancelQueries({ queryKey: issueKeys.list(wsId) });
-      const prevLists = qc.getQueriesData<ListIssuesCache>({ queryKey: issueKeys.list(wsId) });
+      await qc.cancelQueries({ queryKey: issueKeys.myAll(wsId) });
+      const prevLists = [
+        ...qc.getQueriesData<ListIssuesCache>({ queryKey: issueKeys.list(wsId) }),
+        ...qc.getQueriesData<ListIssuesCache>({ queryKey: issueKeys.myAll(wsId) }),
+      ].filter(
+        (entry): entry is [QueryKey, ListIssuesCache] => !!entry[1]?.byStatus,
+      );
       for (const [key, cached] of prevLists) {
-        if (!cached) continue;
         let next = cached;
-        for (const id of ids) next = patchIssueInBuckets(next, id, updates);
+        for (const id of ids) next = patchIssueInBuckets(next, id, patch);
         qc.setQueryData<ListIssuesCache>(key, next);
       }
 
@@ -432,7 +488,7 @@ export function useBatchUpdateIssues() {
         affectedParentIds.add(parentId);
         prevChildren.set(parentId, data);
         qc.setQueryData<Issue[]>(issueKeys.children(wsId, parentId), (old) =>
-          old?.map((c) => (idSet.has(c.id) ? { ...c, ...updates } : c)),
+          old?.map((c) => (idSet.has(c.id) ? { ...c, ...patch } : c)),
         );
       }
 
@@ -451,7 +507,13 @@ export function useBatchUpdateIssues() {
       }
     },
     onSettled: (_data, _err, _vars, ctx) => {
-      qc.invalidateQueries({ queryKey: issueKeys.list(wsId) });
+      // Deliberately NOT invalidating issueKeys.list / myAll here: the onMutate
+      // patch above is a complete surgical reconcile for these bucketed boards
+      // (batch changes status / priority / project — never a server-computed
+      // value), so a full-board refetch on settle would only re-introduce the
+      // flicker the single-issue update already removed. Aggregate / grouped
+      // caches that cannot be recomputed from a single-issue patch are still
+      // refreshed below.
       qc.invalidateQueries({ queryKey: issueKeys.assigneeGroupsAll(wsId) });
       qc.invalidateQueries({ queryKey: issueKeys.myAssigneeGroupsAll(wsId) });
       qc.invalidateQueries({ queryKey: issueKeys.projectGanttAll(wsId) });
@@ -598,12 +660,14 @@ export function useCreateComment(issueId: string) {
       type,
       parentId,
       attachmentIds,
+      suppressAgentIds,
     }: {
       content: string;
       type?: string;
       parentId?: string;
       attachmentIds?: string[];
-    }) => api.createComment(issueId, content, type, parentId, attachmentIds),
+      suppressAgentIds?: string[];
+    }) => api.createComment(issueId, content, type, parentId, attachmentIds, suppressAgentIds),
     onSuccess: (comment) => {
       const entry: TimelineEntry = {
         type: "comment",
@@ -626,6 +690,10 @@ export function useCreateComment(issueId: string) {
         if (old.some((e) => e.id === entry.id)) return old;
         return sortTimelineEntriesAsc([...old, entry]);
       });
+      // Posting a comment changes the trigger answer itself (the enqueued
+      // task now dedupes follow-up triggers), so cached previews for this
+      // issue are stale the moment the create lands.
+      qc.invalidateQueries({ queryKey: issueKeys.commentTriggerPreview(issueId) });
     },
     // No onSettled invalidate. The `comment:created` WS broadcast keeps
     // the timeline cache fresh after a successful create, and reconnect
@@ -640,8 +708,17 @@ export function useCreateComment(issueId: string) {
 export function useUpdateComment(issueId: string) {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: ({ commentId, content, attachmentIds }: { commentId: string; content: string; attachmentIds: string[] }) =>
-      api.updateComment(commentId, content, attachmentIds),
+    mutationFn: ({
+      commentId,
+      content,
+      attachmentIds,
+      suppressAgentIds,
+    }: {
+      commentId: string;
+      content: string;
+      attachmentIds: string[];
+      suppressAgentIds?: string[];
+    }) => api.updateComment(commentId, content, attachmentIds, suppressAgentIds),
     onMutate: async ({ commentId, content, attachmentIds }) => {
       await qc.cancelQueries({ queryKey: issueKeys.timeline(issueId) });
       const prev = qc.getQueryData<TimelineCache>(issueKeys.timeline(issueId));
@@ -709,6 +786,51 @@ export function useDeleteComment(issueId: string) {
   });
 }
 
+// Every comment id in the same thread as `commentId` — the thread root plus
+// every descendant. Mirrors the server's thread walk in
+// ClearOtherThreadResolutions so the resolve optimistic update can clear sibling
+// resolutions exactly as the backend will, instead of briefly showing two
+// resolutions until the refetch settles.
+function collectThreadCommentIds(
+  entries: TimelineCache,
+  commentId: string,
+): Set<string> {
+  const byId = new Map<string, TimelineEntry>();
+  for (const e of entries) {
+    if (e.type === "comment") byId.set(e.id, e);
+  }
+  // Walk up to the thread root (cycle-guarded against malformed parent chains).
+  let rootId = commentId;
+  const guard = new Set<string>();
+  let cur = byId.get(commentId);
+  while (cur?.parent_id && byId.has(cur.parent_id) && !guard.has(cur.id)) {
+    guard.add(cur.id);
+    rootId = cur.parent_id;
+    cur = byId.get(cur.parent_id);
+  }
+  // Expand back down over the whole subtree.
+  const childrenByParent = new Map<string, string[]>();
+  for (const e of byId.values()) {
+    if (e.parent_id) {
+      const list = childrenByParent.get(e.parent_id) ?? [];
+      list.push(e.id);
+      childrenByParent.set(e.parent_id, list);
+    }
+  }
+  const ids = new Set<string>([rootId]);
+  const stack = [rootId];
+  while (stack.length > 0) {
+    const id = stack.pop()!;
+    for (const child of childrenByParent.get(id) ?? []) {
+      if (!ids.has(child)) {
+        ids.add(child);
+        stack.push(child);
+      }
+    }
+  }
+  return ids;
+}
+
 export function useResolveComment(issueId: string) {
   const qc = useQueryClient();
   return useMutation({
@@ -717,18 +839,29 @@ export function useResolveComment(issueId: string) {
     onMutate: async ({ commentId, resolved }) => {
       await qc.cancelQueries({ queryKey: issueKeys.timeline(issueId) });
       const prev = qc.getQueryData<TimelineCache>(issueKeys.timeline(issueId));
-      qc.setQueryData<TimelineCache>(issueKeys.timeline(issueId), (old) =>
-        old?.map((e) =>
-          e.id === commentId
-            ? {
-                ...e,
-                resolved_at: resolved ? new Date().toISOString() : null,
-                resolved_by_type: resolved ? e.resolved_by_type ?? null : null,
-                resolved_by_id: resolved ? e.resolved_by_id ?? null : null,
-              }
-            : e,
-        ),
-      );
+      qc.setQueryData<TimelineCache>(issueKeys.timeline(issueId), (old) => {
+        if (!old) return old;
+        // Resolving makes this comment the sole resolution in its thread, so
+        // mirror the server (ClearOtherThreadResolutions) and clear every other
+        // resolution in the same thread. Without this the cache shows two
+        // resolutions until the settle refetch, which is exactly the flash the
+        // single-resolution fix removes. Unresolve only clears its own row.
+        const threadIds = resolved ? collectThreadCommentIds(old, commentId) : null;
+        return old.map((e) => {
+          if (e.id === commentId) {
+            return {
+              ...e,
+              resolved_at: resolved ? new Date().toISOString() : null,
+              resolved_by_type: resolved ? e.resolved_by_type ?? null : null,
+              resolved_by_id: resolved ? e.resolved_by_id ?? null : null,
+            };
+          }
+          if (resolved && e.resolved_at && threadIds?.has(e.id)) {
+            return { ...e, resolved_at: null, resolved_by_type: null, resolved_by_id: null };
+          }
+          return e;
+        });
+      });
       return { prev };
     },
     onError: (_err, _vars, ctx) => {

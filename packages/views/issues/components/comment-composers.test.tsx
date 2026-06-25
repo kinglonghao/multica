@@ -1,4 +1,5 @@
-import { forwardRef, useImperativeHandle, useRef, type Ref } from "react";
+import { forwardRef, useImperativeHandle, useRef, type ReactNode, type Ref } from "react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { fireEvent, screen, waitFor } from "@testing-library/react";
 import type { UploadResult } from "@multica/core/hooks/use-file-upload";
@@ -76,21 +77,33 @@ vi.mock("../../editor", () => ({
   }),
 }));
 
-function renderCommentInput(onSubmit = vi.fn().mockResolvedValue(undefined)) {
-  const view = renderWithI18n(<CommentInput issueId="issue-1" onSubmit={onSubmit} />);
+function renderWithProviders(ui: ReactNode) {
+  const queryClient = new QueryClient({
+    defaultOptions: {
+      queries: { retry: false },
+    },
+  });
+  return renderWithI18n(
+    <QueryClientProvider client={queryClient}>{ui}</QueryClientProvider>,
+  );
+}
+
+function renderCommentInput(onSubmit = vi.fn().mockResolvedValue(true)) {
+  const view = renderWithProviders(<CommentInput issueId="issue-1" onSubmit={onSubmit} />);
   return { ...view, onSubmit };
 }
 
 function renderReplyInput({
-  onSubmit = vi.fn().mockResolvedValue(undefined),
+  onSubmit = vi.fn().mockResolvedValue(true),
   size = "sm",
 }: {
-  onSubmit?: (content: string, attachmentIds?: string[]) => Promise<void>;
+  onSubmit?: (content: string, attachmentIds?: string[], suppressAgentIds?: string[]) => Promise<boolean>;
   size?: "sm" | "default";
 } = {}) {
-  const view = renderWithI18n(
+  const view = renderWithProviders(
     <ReplyInput
       issueId="issue-1"
+      parentId="comment-1"
       avatarType="member"
       avatarId="user-1"
       onSubmit={onSubmit}
@@ -155,7 +168,7 @@ describe("comment composers", () => {
     fireEvent.click(getSubmitButton(container));
 
     await waitFor(() => {
-      expect(onSubmit).toHaveBeenCalledWith("hello from composer", undefined);
+      expect(onSubmit).toHaveBeenCalledWith("hello from composer", undefined, undefined);
     });
   });
 
@@ -168,7 +181,45 @@ describe("comment composers", () => {
     fireEvent.click(getSubmitButton(container));
 
     await waitFor(() => {
-      expect(onSubmit).toHaveBeenCalledWith("thread reply", undefined);
+      expect(onSubmit).toHaveBeenCalledWith("thread reply", undefined, undefined);
     });
+  });
+
+  it("locks the editor while the send is in flight, then clears on success", async () => {
+    let resolveSubmit: (ok: boolean) => void = () => {};
+    const onSubmit = vi.fn(
+      () => new Promise<boolean>((resolve) => { resolveSubmit = resolve; }),
+    );
+    const { container } = renderCommentInput(onSubmit);
+
+    fireEvent.change(screen.getByTestId("editor"), { target: { value: "sending" } });
+    fireEvent.click(getSubmitButton(container));
+
+    // In flight: text kept, editor wrapper locked (aria-busy), not cleared yet.
+    await waitFor(() =>
+      expect(screen.getByTestId("editor").closest("[aria-busy]")).toHaveAttribute(
+        "aria-busy",
+        "true",
+      ),
+    );
+    expect(onSubmit).toHaveBeenCalledWith("sending", undefined, undefined);
+
+    resolveSubmit(true);
+
+    // Success: the composer clears (now empty → submit disabled, lock released).
+    await waitFor(() => expect(getSubmitButton(container)).toBeDisabled());
+    expect(screen.getByTestId("editor").closest("[aria-busy]")).toBeNull();
+  });
+
+  it("keeps the draft when the send fails (no optimistic clear)", async () => {
+    const onSubmit = vi.fn().mockResolvedValue(false);
+    const { container } = renderCommentInput(onSubmit);
+
+    fireEvent.change(screen.getByTestId("editor"), { target: { value: "will fail" } });
+    fireEvent.click(getSubmitButton(container));
+
+    await waitFor(() => expect(onSubmit).toHaveBeenCalled());
+    // Failed send must NOT clear — the box still has content, submit stays live.
+    await waitFor(() => expect(getSubmitButton(container)).not.toBeDisabled());
   });
 });

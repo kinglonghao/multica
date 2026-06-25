@@ -18,6 +18,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/multica-ai/multica/server/internal/daemon/execenv"
 	"github.com/multica-ai/multica/server/internal/daemon/repocache"
 	"github.com/multica-ai/multica/server/pkg/agent"
 )
@@ -77,6 +78,85 @@ func TestTriggerRestart_BrewLinuxCellarDeleted(t *testing.T) {
 	}
 	if got := d.RestartBinary(); got == deletedCellarPath {
 		t.Fatalf("restart binary used deleted Cellar path %q", got)
+	}
+}
+
+func TestIsBlockedEnvKey(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		key  string
+		want bool
+	}{
+		{key: "MULTICA_TOKEN", want: true},
+		{key: "multica_runtime_id", want: true},
+		{key: "HOME", want: true},
+		{key: "PATH", want: true},
+		{key: "CODEX_HOME", want: true},
+		{key: "CURSOR_DATA_DIR", want: true},
+		{key: "cursor_data_dir", want: true},
+		{key: "OPENCLAW_CONFIG_PATH", want: true},
+		{key: "OPENCLAW_INCLUDE_ROOTS", want: true},
+		{key: "ANTHROPIC_API_KEY", want: false},
+		{key: "CURSOR_AGENT", want: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.key, func(t *testing.T) {
+			t.Parallel()
+			if got := isBlockedEnvKey(tt.key); got != tt.want {
+				t.Fatalf("isBlockedEnvKey(%q) = %v, want %v", tt.key, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestTaskScopedAuthToken(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		token   string
+		want    string
+		wantErr string
+	}{
+		{
+			name:    "missing token fails closed",
+			wantErr: "server did not provide task-scoped auth token",
+		},
+		{
+			name:    "member token fails closed",
+			token:   "mul_member_token",
+			wantErr: "server provided non-task-scoped auth token",
+		},
+		{
+			name:  "task token accepted",
+			token: " mat_task_token ",
+			want:  "mat_task_token",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			got, err := taskScopedAuthToken(Task{AuthToken: tt.token})
+			if tt.wantErr != "" {
+				if err == nil {
+					t.Fatalf("taskScopedAuthToken() error = nil, want %q", tt.wantErr)
+				}
+				if err.Error() != tt.wantErr {
+					t.Fatalf("taskScopedAuthToken() error = %q, want %q", err.Error(), tt.wantErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("taskScopedAuthToken(): %v", err)
+			}
+			if got != tt.want {
+				t.Fatalf("taskScopedAuthToken() = %q, want %q", got, tt.want)
+			}
+		})
 	}
 }
 
@@ -896,6 +976,71 @@ func newRepoReadyTestDaemon(t *testing.T, handler http.HandlerFunc) *Daemon {
 	return d
 }
 
+func TestGateResumeToReusedWorkdir(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name        string
+		sessionID   string
+		priorDir    string
+		envDir      string
+		wantSession string
+		wantReused  bool
+	}{
+		{
+			name:        "same workdir keeps session",
+			sessionID:   "sess-1",
+			priorDir:    "/ws/task-a/workdir",
+			envDir:      "/ws/task-a/workdir",
+			wantSession: "sess-1",
+			wantReused:  true,
+		},
+		{
+			name:        "fresh workdir drops session",
+			sessionID:   "sess-1",
+			priorDir:    "/ws/task-a/workdir",
+			envDir:      "/ws/task-b/workdir",
+			wantSession: "",
+			wantReused:  false,
+		},
+		{
+			name:        "session without recorded workdir drops session",
+			sessionID:   "sess-1",
+			priorDir:    "",
+			envDir:      "/ws/task-b/workdir",
+			wantSession: "",
+			wantReused:  false,
+		},
+		{
+			name:        "no prior session is a no-op",
+			sessionID:   "",
+			priorDir:    "/ws/task-a/workdir",
+			envDir:      "/ws/task-b/workdir",
+			wantSession: "",
+			wantReused:  false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			task := Task{PriorSessionID: tt.sessionID, PriorWorkDir: tt.priorDir}
+			taskCtx := execenv.TaskContextForEnv{PriorSessionResumed: tt.sessionID != ""}
+
+			reused := gateResumeToReusedWorkdir(&task, &taskCtx, tt.envDir, slog.Default())
+
+			if reused != tt.wantReused {
+				t.Fatalf("reused = %v, want %v", reused, tt.wantReused)
+			}
+			if task.PriorSessionID != tt.wantSession {
+				t.Fatalf("PriorSessionID = %q, want %q", task.PriorSessionID, tt.wantSession)
+			}
+			if taskCtx.PriorSessionResumed != (tt.wantSession != "") {
+				t.Fatalf("PriorSessionResumed = %v, want %v", taskCtx.PriorSessionResumed, tt.wantSession != "")
+			}
+		})
+	}
+}
+
 func TestExecuteAndDrain_ResumeFailureFallback(t *testing.T) {
 	t.Parallel()
 
@@ -1499,7 +1644,7 @@ func TestRegisterTaskReposAllowsProjectOnlyURL(t *testing.T) {
 	// the only repo URL the agent should be able to check out.
 	d.workspaces["ws-1"] = newWorkspaceState("ws-1", nil, "", nil, nil)
 
-	d.registerTaskRepos("ws-1", []RepoData{{URL: sourceRepo}})
+	d.registerTaskRepos("ws-1", "task-project-only", []RepoData{{URL: sourceRepo}})
 
 	// The async clone goroutine in registerTaskRepos may not have finished;
 	// poll briefly until the cache is populated so the test isn't racy.
@@ -1546,7 +1691,7 @@ func TestRegisterTaskReposSurvivesWorkspaceRefresh(t *testing.T) {
 		})
 	})
 	d.workspaces["ws-1"] = newWorkspaceState("ws-1", nil, "", nil, nil)
-	d.registerTaskRepos("ws-1", []RepoData{{URL: sourceRepo}})
+	d.registerTaskRepos("ws-1", "task-refresh", []RepoData{{URL: sourceRepo}})
 
 	// Wait for the registration to populate the cache.
 	deadline := time.Now().Add(5 * time.Second)
@@ -1560,6 +1705,39 @@ func TestRegisterTaskReposSurvivesWorkspaceRefresh(t *testing.T) {
 
 	if !d.workspaceRepoAllowed("ws-1", sourceRepo) {
 		t.Fatal("project repo URL was wiped by workspace refresh")
+	}
+}
+
+func TestTaskRepoDefaultRefScopedByTask(t *testing.T) {
+	t.Parallel()
+
+	const repoURL = "https://github.com/example/shared"
+	d := &Daemon{
+		workspaces: map[string]*workspaceState{
+			"ws-1": newWorkspaceState("ws-1", nil, "", nil, nil),
+		},
+	}
+
+	d.registerTaskRepos("ws-1", "task-a", []RepoData{
+		{URL: repoURL, Ref: "release/a"},
+		{URL: repoURL, Ref: "late-duplicate"},
+	})
+	d.registerTaskRepos("ws-1", "task-b", []RepoData{{URL: repoURL, Ref: "release/b"}})
+
+	if got := d.taskRepoDefaultRef("ws-1", "task-a", repoURL); got != "release/a" {
+		t.Fatalf("task-a default ref = %q, want release/a", got)
+	}
+	if got := d.taskRepoDefaultRef("ws-1", "task-b", repoURL); got != "release/b" {
+		t.Fatalf("task-b default ref = %q, want release/b", got)
+	}
+
+	d.clearTaskRepoRefs("ws-1", "task-a")
+
+	if got := d.taskRepoDefaultRef("ws-1", "task-a", repoURL); got != "" {
+		t.Fatalf("task-a default ref after cleanup = %q, want empty", got)
+	}
+	if got := d.taskRepoDefaultRef("ws-1", "task-b", repoURL); got != "release/b" {
+		t.Fatalf("task-b default ref after task-a cleanup = %q, want release/b", got)
 	}
 }
 
@@ -1678,7 +1856,7 @@ func TestDefaultArgsForProvider(t *testing.T) {
 	if got := defaultArgsForProvider(cfg, "codex"); strings.Join(got, " ") != "--sandbox workspace-write" {
 		t.Fatalf("unexpected codex args: %#v", got)
 	}
-	if got := defaultArgsForProvider(cfg, "gemini"); got != nil {
+	if got := defaultArgsForProvider(cfg, "unsupported"); got != nil {
 		t.Fatalf("expected nil for unsupported provider, got %#v", got)
 	}
 }

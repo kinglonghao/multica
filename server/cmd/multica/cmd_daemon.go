@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -18,6 +19,7 @@ import (
 
 	"github.com/multica-ai/multica/server/internal/cli"
 	"github.com/multica-ai/multica/server/internal/daemon"
+	"github.com/multica-ai/multica/server/internal/daemon/execenv"
 	logger_pkg "github.com/multica-ai/multica/server/internal/logger"
 	"github.com/multica-ai/multica/server/internal/util"
 )
@@ -64,6 +66,10 @@ var daemonDiskUsageCmd = &cobra.Command{
 	Long: "Walks the daemon's workspaces root and reports per-task or per-workspace disk usage.\n" +
 		"Default view is per-task, sorted by size descending. --by-workspace switches to a per-workspace summary;\n" +
 		"--top N keeps only the largest N entries.\n\n" +
+		"By default only the current profile's root is scanned. --all-profiles aggregates across every workspace\n" +
+		"root — the default root plus each ~/.multica/profiles/* root, including the Desktop app's dedicated\n" +
+		"`desktop-<host>` root — and prints a per-root breakdown with a combined grand total. In that mode --top\n" +
+		"applies within each root and --workspaces-root is not allowed.\n\n" +
 		"Bytes are split into total and the artifact-cleanable subset (node_modules, .next, .turbo by default,\n" +
 		"overridable via MULTICA_GC_ARTIFACT_PATTERNS) so the report stays in sync with what the GC reclaims.\n" +
 		"The walk skips .git and never follows symlinks. The daemon does not need to be running.",
@@ -106,9 +112,10 @@ func init() {
 	df := daemonDiskUsageCmd.Flags()
 	df.Bool("by-workspace", false, "Aggregate output by workspace instead of by task")
 	df.Bool("by-task", false, "Per-task view (default; mutually exclusive with --by-workspace)")
-	df.Int("top", 0, "Keep only the largest N entries (across all workspaces)")
+	df.Int("top", 0, "Keep only the largest N entries (per root in --all-profiles mode)")
 	df.String("output", "table", "Output format: table or json")
 	df.String("workspaces-root", "", "Override the workspaces root path (default: same as the daemon)")
+	df.Bool("all-profiles", false, "Scan every workspace root (default root + all ~/.multica/profiles/* roots, incl. the Desktop app's) and report a combined total")
 
 	daemonCmd.AddCommand(daemonStartCmd)
 	daemonCmd.AddCommand(daemonStopCmd)
@@ -383,6 +390,15 @@ func runDaemonForeground(cmd *cobra.Command) error {
 	defer stop()
 
 	logger := logger_pkg.NewLogger("daemon")
+	serverSnapshotProvider, flags, err := execenv.NewDaemonFeatureFlagServiceFromEnv(logger)
+	if err != nil {
+		return err
+	}
+	execenv.SetServerSnapshotProvider(serverSnapshotProvider)
+	execenv.SetFeatureFlags(flags)
+	defer execenv.SetServerSnapshotProvider(nil)
+	defer execenv.SetFeatureFlags(nil)
+
 	d := daemon.New(cfg, logger)
 
 	// Write PID file so "daemon stop" can find us.
@@ -701,12 +717,20 @@ func runDaemonDiskUsage(cmd *cobra.Command, _ []string) error {
 	byTask, _ := cmd.Flags().GetBool("by-task")
 	top, _ := cmd.Flags().GetInt("top")
 	output, _ := cmd.Flags().GetString("output")
+	allProfiles, _ := cmd.Flags().GetBool("all-profiles")
 
 	if byWorkspace && byTask {
 		return fmt.Errorf("--by-workspace and --by-task are mutually exclusive")
 	}
 	if top < 0 {
 		return fmt.Errorf("--top must be a non-negative integer")
+	}
+	if allProfiles && rootOverride != "" {
+		return fmt.Errorf("--all-profiles and --workspaces-root are mutually exclusive")
+	}
+
+	if allProfiles {
+		return runDaemonDiskUsageAggregate(byWorkspace, top, output)
 	}
 
 	workspacesRoot, err := daemon.ResolveWorkspacesRoot(profile, rootOverride)
@@ -735,10 +759,114 @@ func runDaemonDiskUsage(cmd *cobra.Command, _ []string) error {
 
 	if byWorkspace {
 		printDiskUsageWorkspaceTable(os.Stdout, report)
+		printDiskUsageOtherRootsHint(os.Stdout, report, profile, rootOverride)
 		return nil
 	}
 	printDiskUsageTaskTable(os.Stdout, report)
+	printDiskUsageOtherRootsHint(os.Stdout, report, profile, rootOverride)
 	return nil
+}
+
+// runDaemonDiskUsageAggregate scans every workspace root (the default root plus
+// each ~/.multica/profiles/* root) and renders a per-root breakdown with a
+// combined grand total. This is the path that surfaces the Desktop app's
+// `desktop-<host>` root, which the default single-root scan never sees.
+func runDaemonDiskUsageAggregate(byWorkspace bool, top int, output string) error {
+	roots, err := enumerateDiskUsageRoots()
+	if err != nil {
+		return err
+	}
+	agg, err := daemon.ScanDiskUsageRoots(roots, daemon.ArtifactPatternsFromEnv())
+	if err != nil {
+		return err
+	}
+
+	// --top trims each root's table independently — the grand total in the
+	// report stays anchored to the full scan, mirroring single-root --top.
+	if top > 0 {
+		for i := range agg.Roots {
+			r := &agg.Roots[i].Report
+			if byWorkspace {
+				if top < len(r.Workspaces) {
+					r.Workspaces = r.Workspaces[:top]
+				}
+			} else if top < len(r.Tasks) {
+				r.Tasks = r.Tasks[:top]
+			}
+		}
+	}
+
+	if output == "json" {
+		return cli.PrintJSON(os.Stdout, agg)
+	}
+	printAggregateDiskUsage(os.Stdout, agg, byWorkspace)
+	return nil
+}
+
+// enumerateDiskUsageRoots returns the ordered, de-duplicated set of workspace
+// roots to scan in --all-profiles mode: the default root first (always, for
+// orientation even when empty), then each ~/.multica/profiles/* root that
+// exists on disk, sorted by profile name. Roots that resolve to the same path
+// (e.g. when MULTICA_WORKSPACES_ROOT pins every profile to one directory) are
+// collapsed to a single entry.
+func enumerateDiskUsageRoots() ([]daemon.DiskUsageRoot, error) {
+	seen := map[string]bool{}
+	out := make([]daemon.DiskUsageRoot, 0)
+
+	if root, err := daemon.ResolveWorkspacesRoot("", ""); err == nil {
+		out = append(out, daemon.DiskUsageRoot{Profile: "", Root: root})
+		seen[root] = true
+	}
+
+	profilesRoot, err := profilesRootDir()
+	if err != nil {
+		return out, nil
+	}
+	entries, err := os.ReadDir(profilesRoot)
+	if err != nil {
+		return out, nil
+	}
+	names := make([]string, 0, len(entries))
+	for _, entry := range entries {
+		if entry.IsDir() {
+			names = append(names, entry.Name())
+		}
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		root, err := daemon.ResolveWorkspacesRoot(name, "")
+		if err != nil || seen[root] {
+			continue
+		}
+		// Skip profile roots that were never created on disk — a configured
+		// profile whose daemon never ran has nothing to report.
+		if info, statErr := os.Stat(root); statErr != nil || !info.IsDir() {
+			continue
+		}
+		seen[root] = true
+		out = append(out, daemon.DiskUsageRoot{Profile: name, Root: root})
+	}
+	return out, nil
+}
+
+func printAggregateDiskUsage(w io.Writer, agg daemon.AggregateDiskUsageReport, byWorkspace bool) {
+	fmt.Fprintf(w, "Scanned %d workspace root(s).\n", len(agg.Roots))
+	for _, root := range agg.Roots {
+		fmt.Fprintln(w)
+		label := "default"
+		if root.Profile != "" {
+			label = root.Profile
+		}
+		fmt.Fprintf(w, "[%s]\n", label)
+		if byWorkspace {
+			printDiskUsageWorkspaceTable(w, root.Report)
+		} else {
+			printDiskUsageTaskTable(w, root.Report)
+		}
+	}
+	fmt.Fprintf(w, "\nGrand total: %s across %d task(s) in %d root(s); %s reclaimable as artifacts (%.1f%%).\n",
+		formatBytes(agg.TotalSizeBytes), agg.TotalTaskCount, len(agg.Roots),
+		formatBytes(agg.TotalArtifactSizeBytes), agg.TotalArtifactRatio*100)
 }
 
 func printDiskUsageTaskTable(w io.Writer, report daemon.DiskUsageReport) {
@@ -812,6 +940,159 @@ func printDiskUsageWorkspaceTable(w io.Writer, report daemon.DiskUsageReport) {
 	fmt.Fprintf(w, "\nTotal: %s across %d workspace(s); %s reclaimable as artifacts (%.1f%%).\n",
 		formatBytes(report.TotalSizeBytes), report.TotalWorkspaceCount,
 		formatBytes(report.TotalArtifactSizeBytes), report.TotalArtifactRatio*100)
+}
+
+// printDiskUsageOtherRootsHint warns that workspace roots OTHER than the one
+// just scanned also hold task directories — the case that hides the Desktop
+// app's `desktop-<host>` root behind a non-empty default root. It fires
+// whenever such roots exist (empty current root or not); the only opt-out is an
+// explicit --workspaces-root, where the user already chose exactly what to scan.
+func printDiskUsageOtherRootsHint(w io.Writer, report daemon.DiskUsageReport, profile, rootOverride string) {
+	if rootOverride != "" {
+		return
+	}
+	suggestions := diskUsageProfileSuggestions(profile, report.WorkspacesRoot)
+	if len(suggestions) == 0 {
+		return
+	}
+	fmt.Fprintln(w)
+	fmt.Fprintln(w, "Other workspace roots contain task directories:")
+	for _, s := range suggestions {
+		fmt.Fprintf(w, "  %s  # %s (%d task%s)\n",
+			s.Command, s.Root, s.TaskCount, pluralS(s.TaskCount))
+	}
+	fmt.Fprintln(w, "Run 'multica daemon disk-usage --all-profiles' for a combined total across all roots.")
+}
+
+type diskUsageProfileSuggestion struct {
+	Profile   string
+	Command   string
+	Root      string
+	TaskCount int
+}
+
+func diskUsageProfileSuggestions(currentProfile, currentRoot string) []diskUsageProfileSuggestion {
+	out := make([]diskUsageProfileSuggestion, 0)
+	if currentProfile != "" {
+		if root, err := daemon.ResolveWorkspacesRoot("", ""); err == nil && !samePath(root, currentRoot) {
+			if taskCount := countDiskUsageTaskDirs(root); taskCount > 0 {
+				out = append(out, diskUsageProfileSuggestion{
+					Profile:   "",
+					Command:   "multica daemon disk-usage",
+					Root:      root,
+					TaskCount: taskCount,
+				})
+			}
+		}
+	}
+
+	profilesRoot, err := profilesRootDir()
+	if err != nil {
+		return out
+	}
+	entries, err := os.ReadDir(profilesRoot)
+	if err != nil {
+		return out
+	}
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		profile := entry.Name()
+		if profile == currentProfile {
+			continue
+		}
+		root, err := daemon.ResolveWorkspacesRoot(profile, "")
+		if err != nil || samePath(root, currentRoot) {
+			continue
+		}
+		taskCount := countDiskUsageTaskDirs(root)
+		if taskCount == 0 {
+			continue
+		}
+		out = append(out, diskUsageProfileSuggestion{
+			Profile:   profile,
+			Command:   "multica --profile " + shellQuoteArg(profile) + " daemon disk-usage",
+			Root:      root,
+			TaskCount: taskCount,
+		})
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].TaskCount == out[j].TaskCount {
+			return out[i].Profile < out[j].Profile
+		}
+		return out[i].TaskCount > out[j].TaskCount
+	})
+	const maxSuggestions = 5
+	if len(out) > maxSuggestions {
+		out = out[:maxSuggestions]
+	}
+	return out
+}
+
+func shellQuoteArg(s string) string {
+	if s == "" {
+		return "''"
+	}
+	if strings.IndexFunc(s, func(r rune) bool {
+		return !(r == '-' || r == '_' || r == '.' || r == '/' ||
+			r >= '0' && r <= '9' ||
+			r >= 'A' && r <= 'Z' ||
+			r >= 'a' && r <= 'z')
+	}) == -1 {
+		return s
+	}
+	return "'" + strings.ReplaceAll(s, "'", "'\\''") + "'"
+}
+
+func countDiskUsageTaskDirs(root string) int {
+	wsEntries, err := os.ReadDir(root)
+	if err != nil {
+		return 0
+	}
+	count := 0
+	for _, wsEntry := range wsEntries {
+		if !wsEntry.IsDir() || wsEntry.Name() == ".repos" {
+			continue
+		}
+		taskEntries, err := os.ReadDir(filepath.Join(root, wsEntry.Name()))
+		if err != nil {
+			continue
+		}
+		for _, taskEntry := range taskEntries {
+			if taskEntry.IsDir() {
+				count++
+			}
+		}
+	}
+	return count
+}
+
+func profilesRootDir() (string, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(home, ".multica", "profiles"), nil
+}
+
+func samePath(a, b string) bool {
+	if a == "" || b == "" {
+		return false
+	}
+	aa, errA := filepath.Abs(a)
+	bb, errB := filepath.Abs(b)
+	if errA != nil || errB != nil {
+		return a == b
+	}
+	return aa == bb
+}
+
+func pluralS(n int) string {
+	if n == 1 {
+		return ""
+	}
+	return "s"
 }
 
 // formatRatio renders a 0..1 fraction as a percentage to one decimal. A

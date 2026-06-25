@@ -249,6 +249,27 @@ func TestBuildPromptSquadLeaderNoActionForAgentTrigger(t *testing.T) {
 	}
 }
 
+func TestBuildChatPromptAttachmentIDsCanBeBoundToCreatedIssues(t *testing.T) {
+	task := Task{
+		ChatSessionID: "sess-1",
+		ChatMessage:   "please create an issue with this screenshot",
+		ChatMessageAttachments: []ChatAttachmentMeta{
+			{ID: "019ec09d-6222-722b-bdfa-427b105d80be", Filename: "shot.png", ContentType: "image/png"},
+		},
+	}
+	out := BuildPrompt(task, "claude")
+	for _, want := range []string{
+		"Attachments on this message:",
+		"id=019ec09d-6222-722b-bdfa-427b105d80be",
+		"multica attachment download <id>",
+		"--attachment-id <id>",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("chat prompt missing %q\n--- output ---\n%s", want, out)
+		}
+	}
+}
+
 func TestBuildChatPromptSlashSkills(t *testing.T) {
 	t.Run("injects selected skills block", func(t *testing.T) {
 		task := Task{
@@ -355,14 +376,13 @@ func TestBuildChatPromptSlashSkills(t *testing.T) {
 }
 
 // TestBuildPromptDefaultMentionsRecent pins that the catch-all fallback
-// prompt (no trigger comment, no chat, no autopilot, no quick-create) also
-// teaches the agent about --recent as the long-issue-friendly alternative
-// to the flat dump, even though it cannot anchor a --thread without a
-// trigger comment id.
+// prompt (no trigger comment, no chat, no autopilot, no quick-create)
+// starts assignment-triggered comment catch-up with a bounded recent read,
+// while still keeping older history available through pagination.
 func TestBuildPromptDefaultMentionsRecent(t *testing.T) {
 	out := BuildPrompt(Task{IssueID: "issue-default-1"}, "claude")
 	for _, s := range []string{
-		"--recent 20 --output json",
+		"multica issue comment list issue-default-1 --recent 10 --output json",
 		"Next thread cursor:",
 		"--since",
 	} {
@@ -380,6 +400,9 @@ func TestBuildPromptDefaultMentionsRecent(t *testing.T) {
 	// as mandatory. Guard against it sneaking back in.
 	if strings.Contains(out, "If you need comment history") {
 		t.Errorf("default BuildPrompt still carries the legacy 'If you need' soft phrasing that conflicts with the mandatory workflow\n--- output ---\n%s", out)
+	}
+	if strings.Contains(out, "multica issue comment list issue-default-1 --output json") {
+		t.Errorf("default BuildPrompt still presents the unbounded flat read as the assignment catch-up command\n--- output ---\n%s", out)
 	}
 }
 
@@ -469,6 +492,12 @@ func TestBuildPromptColdStartThreadRead(t *testing.T) {
 	}
 	if !strings.Contains(out, "multica issue comment list "+issueID+" --thread thread-root-1 --tail 30 --output json") {
 		t.Errorf("cold start must point at the triggering thread read, got:\n%s", out)
+	}
+	if !strings.Contains(out, "multica issue comment list "+issueID+" --recent 10 --output json") {
+		t.Errorf("cold start cross-thread fallback should use recent 10, got:\n%s", out)
+	}
+	if strings.Contains(out, "--recent 20") {
+		t.Errorf("cold start cross-thread fallback still uses recent 20, got:\n%s", out)
 	}
 }
 
