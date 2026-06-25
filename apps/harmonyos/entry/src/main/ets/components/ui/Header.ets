@@ -30,7 +30,7 @@ export struct Header {
     .padding({
       left: space('4'),
       right: space('4'),
-      top: space('3'),
+      top: space('6'),
       bottom: space('3')
     })
     .backgroundColor(String(themeTokens(this.scheme).background))

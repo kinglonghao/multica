@@ -18,7 +18,7 @@
  */
 
 export type IssueStatus = 'backlog' | 'todo' | 'in_progress' | 'in_review' | 'done' | 'cancelled' | string;
-export type IssuePriority = 'no_priority' | 'urgent' | 'high' | 'medium' | 'low' | string;
+export type IssuePriority = 'none' | 'urgent' | 'high' | 'medium' | 'low' | string;
 export type IssueAssigneeType = 'member' | 'agent' | null;
 export type InboxType = 'mention' | 'assignment' | 'status' | 'comment' | 'review_request' | string;
 export type ProjectStatus = 'planned' | 'in_progress' | 'paused' | 'completed' | 'cancelled' | string;
@@ -49,10 +49,13 @@ export interface Member {
   workspace_id: string;
   role: 'owner' | 'admin' | 'member' | 'guest';
   user?: User;
+  name?: string | null;
+  email?: string | null;
+  avatar_url?: string | null;
 }
 
 export interface MemberWithUser extends Member {
-  user: User;
+  user?: User;
 }
 
 export interface Issue {

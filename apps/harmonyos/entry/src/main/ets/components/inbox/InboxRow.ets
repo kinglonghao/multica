@@ -64,7 +64,7 @@ export struct InboxRow {
 
         if (this.issueTitle) {
           Row() {
-            StatusIcon({ status: 'todo', scheme: this.scheme, iconSize: 12 })
+            this.IssueBadge()
             MulticaText({
               value: `${this.issueIdentifier} · ${this.issueTitle}`,
               scheme: this.scheme,
@@ -74,7 +74,7 @@ export struct InboxRow {
               overflow: 'ellipsis'
             })
               .layoutWeight(1)
-              .margin({ left: space('1.5') })
+              .margin({ left: space('2') })
           }
           .width('100%')
           .margin({ top: space('1') })
@@ -98,6 +98,19 @@ export struct InboxRow {
       color: String(themeTokens(this.scheme).border)
     })
     .onClick(() => { this.onPress(); })
+  }
+
+  @Builder IssueBadge() {
+    Stack({ alignContent: Alignment.Center }) {
+      Row()
+        .width(16)
+        .height(16)
+        .borderRadius(8)
+        .backgroundColor(String(themeTokens(this.scheme).card))
+      StatusIcon({ status: 'todo', scheme: this.scheme, iconSize: 10 })
+    }
+    .width(16)
+    .height(16)
   }
 
   private summary(): string {

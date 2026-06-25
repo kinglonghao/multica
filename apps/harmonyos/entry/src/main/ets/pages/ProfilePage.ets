@@ -1,4 +1,3 @@
-import { appNavigation } from '../data/navigation';
 import { authStore } from '../data/auth';
 import { api } from '../data/api';
 import { ColorScheme, RADIUS, space, themeTokens } from '../lib/theme';
@@ -19,11 +18,11 @@ export struct ProfilePage {
   aboutToAppear(): void {
     this.scheme = this.detectScheme();
     const user = authStore.getState().user;
-    this.displayName = user?.display_name ?? '';
+    this.displayName = user?.display_name ?? user?.email ?? '';
     this.email = user?.email ?? '';
   }
 
-    private detectScheme(): ColorScheme {
+  private detectScheme(): ColorScheme {
     return detectSystemColorScheme();
   }
 
@@ -32,7 +31,7 @@ export struct ProfilePage {
     this.errorMessage = '';
     this.success = false;
     try {
-      await api.updateMe({ display_name: this.displayName });
+      await api.updateMe({ display_name: this.displayName.trim() });
       this.success = true;
     } catch (err) {
       this.errorMessage = err instanceof Error ? err.message : 'Failed to update profile';
@@ -46,57 +45,83 @@ export struct ProfilePage {
       Scroll() {
         Column() {
           Column() {
-            Row() {
-              Avatar({ name: this.displayName || this.email, url: '', avatarSize: 52, scheme: this.scheme })
-              Column() {
-                MulticaText({
-                  value: this.displayName || this.email,
-                  scheme: this.scheme,
-                  textSize: 'sm',
-                  weight: 'semibold',
-                  color: 'foreground'
-                })
-                MulticaText({
-                  value: this.email,
-                  scheme: this.scheme,
-                  textSize: 'xs',
-                  color: 'mutedForeground'
-                })
-                  .margin({ top: 3 })
-              }
-              .layoutWeight(1)
-              .margin({ left: space('3') })
-              .alignItems(HorizontalAlign.Start)
-            }
-            .width('100%')
-          }
-          .width('100%')
-          .padding(space('3'))
-          .margin({ top: space('3') })
-          .backgroundColor(String(themeTokens(this.scheme).background))
-          .borderRadius(RADIUS.lg)
-          .border({ width: 1, color: String(themeTokens(this.scheme).border) })
+            Avatar({ name: this.displayName || this.email, url: '', avatarSize: 96, scheme: this.scheme })
 
-          Column() {
             MulticaText({
-              value: 'Display name',
+              value: this.saving ? 'Saving profile…' : 'Tap to change photo',
               scheme: this.scheme,
               textSize: 'xs',
-              weight: 'semibold',
               color: 'mutedForeground'
             })
-            TextInput({ placeholder: 'Display name', text: this.displayName })
-              .placeholderColor(String(themeTokens(this.scheme).mutedForeground))
-              .fontColor(String(themeTokens(this.scheme).foreground))
-              .backgroundColor(String(themeTokens(this.scheme).background))
-              .borderRadius(RADIUS.md)
-              .padding({ left: space('3'), right: space('3'), top: space('2.5'), bottom: space('2.5') })
-              .width('100%')
-              .margin({ top: space('2') })
-              .onChange((value: string) => {
-                this.displayName = value;
-                this.success = false;
+              .margin({ top: space('3') })
+          }
+          .width('100%')
+          .padding({ top: space('6') })
+          .alignItems(HorizontalAlign.Center)
+
+          Row() {}
+            .width('100%')
+            .height(1)
+            .margin({ top: space('6') })
+            .backgroundColor(String(themeTokens(this.scheme).border))
+
+          Column() {
+            Column() {
+              MulticaText({
+                value: 'Name',
+                scheme: this.scheme,
+                textSize: 'xs',
+                color: 'mutedForeground'
               })
+              TextInput({ placeholder: 'Your name', text: this.displayName })
+                .placeholderColor(String(themeTokens(this.scheme).mutedForeground))
+                .fontColor(String(themeTokens(this.scheme).foreground))
+                .backgroundColor('#FFFFFF')
+                .borderRadius(RADIUS.md)
+                .padding({ left: space('3'), right: space('3'), top: space('3'), bottom: space('3') })
+                .margin({ top: space('2') })
+                .border({ width: 1, color: String(themeTokens(this.scheme).border) })
+                .onChange((value: string) => {
+                  this.displayName = value;
+                  this.success = false;
+                })
+            }
+            .width('100%')
+            .alignItems(HorizontalAlign.Start)
+
+            Column() {
+              MulticaText({
+                value: 'Email',
+                scheme: this.scheme,
+                textSize: 'xs',
+                color: 'mutedForeground'
+              })
+              Row() {
+                MulticaText({
+                  value: this.email || '—',
+                  scheme: this.scheme,
+                  textSize: 'sm',
+                  color: 'mutedForeground'
+                })
+              }
+              .width('100%')
+              .padding({ left: space('3'), right: space('3'), top: space('3'), bottom: space('3') })
+              .margin({ top: space('2') })
+              .backgroundColor('#F4F4F5')
+              .borderRadius(RADIUS.md)
+              .border({ width: 1, color: '#ECECF1' })
+
+              MulticaText({
+                value: 'Email is set at sign-up and can’t be changed here.',
+                scheme: this.scheme,
+                textSize: 'xs',
+                color: 'mutedForeground'
+              })
+                .margin({ top: space('2') })
+            }
+            .width('100%')
+            .margin({ top: space('4') })
+            .alignItems(HorizontalAlign.Start)
 
             if (this.errorMessage) {
               MulticaText({
@@ -105,7 +130,7 @@ export struct ProfilePage {
                 textSize: 'xs',
                 color: 'destructive'
               })
-                .margin({ top: space('2') })
+                .margin({ top: space('3') })
             }
 
             if (this.success) {
@@ -115,31 +140,36 @@ export struct ProfilePage {
                 textSize: 'xs',
                 color: 'success'
               })
-                .margin({ top: space('2') })
+                .margin({ top: space('3') })
             }
           }
           .width('100%')
-          .padding(space('3'))
-          .margin({ top: space('3') })
-          .backgroundColor(String(themeTokens(this.scheme).background))
-          .borderRadius(RADIUS.lg)
-          .border({ width: 1, color: String(themeTokens(this.scheme).border) })
+          .padding({ left: space('4'), right: space('4'), top: space('6'), bottom: space('8') })
           .alignItems(HorizontalAlign.Start)
-
-          MulticaButton({
-            label: this.saving ? 'Saving...' : 'Save',
-            scheme: this.scheme,
-            variant: 'primary',
-            fullWidth: true,
-            disabled: this.saving,
-            onTap: () => { void this.save(); }
-          })
-            .margin({ left: space('3'), right: space('3'), top: space('4') })
         }
         .width('100%')
       }
       .layoutWeight(1)
       .width('100%')
+      .scrollBar(BarState.Off)
+
+      Row() {
+        MulticaButton({
+          label: this.saving ? 'Saving…' : 'Save',
+          scheme: this.scheme,
+          variant: 'primary',
+          fullWidth: true,
+          disabled: this.saving,
+          onTap: () => { void this.save(); }
+        })
+      }
+      .width('100%')
+      .padding({ left: space('4'), right: space('4'), top: space('3'), bottom: space('4') })
+      .backgroundColor(String(themeTokens(this.scheme).background))
+      .border({
+        width: { top: 1 },
+        color: String(themeTokens(this.scheme).border)
+      })
     }
     .width('100%')
     .height('100%')

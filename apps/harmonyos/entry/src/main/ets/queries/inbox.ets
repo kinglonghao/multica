@@ -16,7 +16,7 @@ export const inboxQueryKey: (wsId: string | null) => QueryKey =
  */
 export function useInboxQuery(onUpdate?: () => void): QueryHandle<InboxItem[]> {
   const wsId = workspaceStore.currentId;
-  const opts: QueryOptions = { staleTimeMs: 30_000 };
+  const opts: QueryOptions = { staleTimeMs: 120_000 };
   if (onUpdate) opts.onUpdate = onUpdate;
   return useQuery<InboxItem[]>(
     inboxQueryKey(wsId),

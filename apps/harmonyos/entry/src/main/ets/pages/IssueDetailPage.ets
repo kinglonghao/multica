@@ -70,7 +70,7 @@ export struct IssueDetailPage {
   @Local _issueError: Error | null = null;
   @Local _issueActorName: string = '';
   @Local _issueActorAvatar: string = '';
-  @Local _issueActorLabel: string = 'Owner';
+  @Local _pageReady: boolean = false;
   @Local _commentsIsLoading: boolean = true;
   @Local _comments: Comment[] | undefined = undefined;
   @Local _commentsError: Error | null = null;
@@ -150,6 +150,7 @@ export struct IssueDetailPage {
         this._issueError = s.error;
         this.debugInfo('sync:issue', `loading=${s.isLoading} hasData=${s.data !== undefined} error=${s.error ? s.error.message : 'none'}`);
       }
+      this._pageReady = this._pageReady || this._issue !== undefined || this._issueError !== null;
       if (this.comments) {
         const s = this.comments.getState();
         this._commentsIsLoading = s.isLoading;
@@ -178,17 +179,22 @@ export struct IssueDetailPage {
   private async submitComment(): Promise<void> {
     const text = this.commentDraft.trim();
     if (!text || this.sendingComment) return;
+    this.debugInfo('submitComment:start', `draftLen=${text.length} existingComments=${this._comments ? this._comments.length : -1}`);
     this.sendingComment = true;
     this.commentError = '';
     try {
       await createComment(this.issueId, text);
+      this.debugInfo('submitComment:created', `draftLen=${text.length}`);
       this.commentDraft = '';
       this.commentComposerExpanded = false;
       this.comments?.refetch();
+      this.debugInfo('submitComment:refetch-requested');
     } catch (err) {
+      this.debugError('submitComment:catch', err as Object);
       this.commentError = err instanceof Error ? err.message : 'Failed to post comment';
     } finally {
       this.sendingComment = false;
+      this.debugInfo('submitComment:finally', `sending=${this.sendingComment} error=${this.commentError || 'none'}`);
     }
   }
 
@@ -340,9 +346,7 @@ export struct IssueDetailPage {
       const members = this.members?.getState().data;
       if (!members) return '';
       const found = members.find((member: MemberWithUser) => member.user_id === id);
-      const user = found?.user;
-      if (!user) return '';
-      return user.display_name ?? user.username ?? user.email;
+      return found?.name ?? found?.email ?? found?.user?.display_name ?? found?.user?.username ?? found?.user?.email ?? '';
     }
     return '';
   }
@@ -359,15 +363,15 @@ export struct IssueDetailPage {
       const members = this.members?.getState().data;
       if (!members) return '';
       const found = members.find((member: MemberWithUser) => member.user_id === id);
-      return found?.user?.avatar_url ?? '';
+      return found?.avatar_url ?? found?.user?.avatar_url ?? '';
     }
     return '';
   }
 
   private commentBody(c: Comment): string {
-    if (c.body && c.body.trim().length > 0) return c.body;
-    if (c.content && c.content.trim().length > 0) return c.content;
-    return '';
+    const body = c.body && c.body.trim().length > 0 ? c.body : (c.content && c.content.trim().length > 0 ? c.content : '');
+    this.debugInfo('commentBody', `commentId=${c.id} bodyLen=${body.length} hasBody=${c.body ? 'yes' : 'no'} hasContent=${c.content ? 'yes' : 'no'}`);
+    return body;
   }
 
   build() {
@@ -405,8 +409,27 @@ export struct IssueDetailPage {
   }
 
   @Builder Body() {
-    if (this._issueIsLoading) {
-      this.Loading()
+    if ((this._issue === undefined && this._issueError === null) || this._issueIsLoading) {
+      if (this._pageReady && this._comments && this._comments.length > 0) {
+        Column() {
+          Scroll() {
+            Column() {
+              this.Timeline()
+            }
+            .width('100%')
+            .padding({ left: space('4'), right: space('4'), top: space('4'), bottom: space('6') })
+            .alignItems(HorizontalAlign.Start)
+          }
+          .layoutWeight(1)
+          .width('100%')
+
+          this.Composer()
+        }
+        .layoutWeight(1)
+        .width('100%')
+      } else {
+        this.Loading()
+      }
     } else if (this._issueError) {
       this.ErrorState(this._issueError.message)
     } else if (this._issue) {

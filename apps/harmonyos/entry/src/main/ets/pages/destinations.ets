@@ -23,6 +23,8 @@ import { IssueDetailPage } from './IssueDetailPage';
 import { ProjectDetailPage } from './ProjectDetailPage';
 import { NewIssuePage } from './NewIssuePage';
 import { SearchPage } from './SearchPage';
+import { ProjectsPage } from './ProjectsPage';
+import { IssuesPage } from './IssuesPage';
 import { SwitchWorkspacePage } from './SwitchWorkspacePage';
 import { ProfilePage } from './ProfilePage';
 import { NotificationsPage } from './NotificationsPage';
@@ -93,6 +95,14 @@ export function PageDestinations(name: string, param: object): void {
   } else if (name === 'SearchPage') {
     NavDestination() {
       SearchPage({ initialTab: readTab(param, 'issues') });
+    }
+  } else if (name === 'ProjectsPage') {
+    NavDestination() {
+      ProjectsPage();
+    }
+  } else if (name === 'IssuesPage') {
+    NavDestination() {
+      IssuesPage();
     }
   } else if (name === 'SwitchWorkspacePage') {
     NavDestination() {

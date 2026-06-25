@@ -61,17 +61,17 @@ export async function createComment(issueId: string, body: string): Promise<Comm
 
 export async function updateComment(issueId: string, commentId: string, body: string): Promise<Comment> {
   const saved = await api.updateComment(commentId, body);
-  queryClient.invalidate(issueDetailKey(wsId(), issueId));
+  queryClient.invalidate(['issue-comments', issueId]);
   return saved;
 }
 
 export async function deleteComment(issueId: string, commentId: string): Promise<void> {
   await api.deleteComment(commentId);
-  queryClient.invalidate(issueDetailKey(wsId(), issueId));
+  queryClient.invalidate(['issue-comments', issueId]);
 }
 
 export async function reactToComment(issueId: string, commentId: string, emoji: string): Promise<IssueReaction> {
   const reaction = await api.reactToComment(commentId, emoji);
-  queryClient.invalidate(issueDetailKey(wsId(), issueId));
+  queryClient.invalidate(['issue-comments', issueId]);
   return reaction;
 }

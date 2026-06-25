@@ -156,8 +156,13 @@ interface UploadFileAsset {
   type: string;
 }
 
-interface CommentBodyRequest {
-  body: string;
+interface CreateCommentRequestBody {
+  content: string;
+  type: 'comment';
+}
+
+interface UpdateCommentRequestBody {
+  content: string;
 }
 
 interface TimelineResponse {
@@ -428,7 +433,10 @@ class ApiClient {
     if (opts) {
       merged.cancelToken = opts.cancelToken;
     }
-    const req: CommentBodyRequest = { body };
+    const req: CreateCommentRequestBody = {
+      content: body,
+      type: 'comment'
+    };
     const parseOpts: ParseOptions = {
       endpoint: 'POST /api/issues/:id/comments'
     };
@@ -442,7 +450,7 @@ class ApiClient {
   }
 
   async updateComment(commentId: string, body: string): Promise<Comment> {
-    const req: CommentBodyRequest = { body };
+    const req: UpdateCommentRequestBody = { content: body };
     const parseOpts: ParseOptions = {
       endpoint: 'PATCH /api/comments/:id'
     };

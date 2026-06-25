@@ -1,4 +1,5 @@
 import webSocket from '@ohos.net.webSocket';
+import hilog from '@ohos.hilog';
 import { BusinessError } from '@ohos.base';
 import { Preferences } from '../data/preferences';
 import {
@@ -41,6 +42,13 @@ import { isKnownWSEvent, WSEventNames } from '../lib/ws-events';
 type State = 'idle' | 'connecting' | 'active' | 'paused' | 'failed';
 
 const MIN_RECONNECT_MS = 100;
+const WS_DEBUG_DOMAIN = 0xFF18;
+const WS_DEBUG_TAG = 'WSClient';
+
+interface ErrorWithCode {
+  code?: number | string;
+  message?: string;
+}
 
 type Handler = (envelope: WSEnvelope<Object | string | number | boolean | null>) => void;
 type ReconnectHandler = () => void;
@@ -64,6 +72,31 @@ export class WSClient {
   private readonly handlers: Map<WSEventType, Set<Handler>> = new Map();
   private readonly reconnectHandlers: Set<ReconnectHandler> = new Set();
   private readonly queued: QueuedEvent[] = [];
+
+  // #region debug-point issue-create-crash-ws
+  private debugInfo(stage: string, extra: string = ''): void {
+    hilog.info(WS_DEBUG_DOMAIN, WS_DEBUG_TAG,
+      `stage=${stage} state=${this.state} retry=${this.retryAttempt} ${extra}`);
+  }
+
+  private debugError(stage: string, err: BusinessError | Error | null = null, extra: string = ''): void {
+    let code = 'n/a';
+    let message = 'unknown';
+    if (err !== null) {
+      const maybeWithCode = err as ErrorWithCode;
+      if (maybeWithCode.code !== undefined) {
+        code = `${maybeWithCode.code}`;
+      }
+      if (maybeWithCode.message !== undefined) {
+        message = maybeWithCode.message;
+      } else {
+        message = `${err}`;
+      }
+    }
+    hilog.error(WS_DEBUG_DOMAIN, WS_DEBUG_TAG,
+      `stage=${stage} state=${this.state} code=${code} message=${message} ${extra}`);
+  }
+  // #endregion
 
   /**
    * Subscribe to a WS event. Returns an unsubscribe function.
@@ -119,47 +152,62 @@ export class WSClient {
    * (NOT a query-string param — those leak into server logs).
    */
   connect(): void {
-    if (this.state === 'active' || this.state === 'connecting') return;
+    this.debugInfo('connect:enter');
+    if (this.state === 'active' || this.state === 'connecting') {
+      this.debugInfo('connect:skip-active');
+      return;
+    }
     const token = Preferences.get('authToken');
     const slug = Preferences.get('workspaceSlug');
     if (!token || !slug) {
       this.state = 'idle';
+      this.debugInfo('connect:missing-auth', `hasToken=${token ? 'yes' : 'no'} hasSlug=${slug ? 'yes' : 'no'}`);
       return;
     }
     this.state = 'connecting';
-    // Header-based auth. Falls back to the URL query on platforms
-    // where webSocket doesn't accept custom headers — but HarmonyOS's
-    // @ohos.net.webSocket does (see the .connect call below).
     const wsUrl = getBaseUrl().replace(/^http/, 'ws') + '/api/ws';
+    this.debugInfo('connect:start', `url=${wsUrl} slug=${slug}`);
     const socket = webSocket.createWebSocket();
     socket.on('open', () => {
       this.state = 'active';
       this.retryAttempt = 0;
+      this.debugInfo('socket:open');
       for (const cb of this.reconnectHandlers) cb();
     });
     socket.on('message', (err: BusinessError, value: string | ArrayBuffer) => {
       if (err) {
+        this.debugError('socket:message-error', err);
         console.warn('[ws] message error', err.code, err.message);
         return;
       }
-      if (typeof value !== 'string') return;
+      if (typeof value !== 'string') {
+        this.debugInfo('socket:message-non-string');
+        return;
+      }
+      this.debugInfo('socket:message', `len=${value.length}`);
       const envelope: WSEnvelope<Object | string | number | boolean | null> | null = parseWSEnvelope(value);
-      if (!envelope) return;
+      if (!envelope) {
+        this.debugInfo('socket:message-parse-null');
+        return;
+      }
       this.dispatch(envelope);
     });
     socket.on('close', (err: BusinessError, result: webSocket.CloseResult) => {
       if (err) {
+        this.debugError('socket:close-error', err);
         console.warn('[ws] close error', err.code, err.message);
         return;
       }
       const code = result.code;
       const reason = result.reason;
+      this.debugInfo('socket:close', `code=${code} reason=${reason}`);
       console.info(`[ws] closed code=${code} reason=${reason}`);
       this.socket = null;
       if (this.state === 'paused') return;
       this.scheduleReconnect();
     });
     socket.on('error', (err: BusinessError) => {
+      this.debugError('socket:error', err);
       console.warn('[ws] error', err.code, err.message);
       this.state = 'failed';
       this.scheduleReconnect();
@@ -169,7 +217,10 @@ export class WSClient {
         'Authorization': `Bearer ${token}`,
         'X-Workspace-Slug': slug
       }
+    }).then(() => {
+      this.debugInfo('connect:promise-resolved');
     }).catch((err: BusinessError) => {
+      this.debugError('connect:promise-rejected', err, `url=${wsUrl}`);
       console.warn('[ws] connect failed', err.code, err.message);
       this.state = 'failed';
       this.scheduleReconnect();

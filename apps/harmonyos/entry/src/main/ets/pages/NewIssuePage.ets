@@ -1,17 +1,19 @@
+import hilog from '@ohos.hilog';
 import { appNavigation, navParam } from '../data/navigation';
 import { api } from '../data/api';
 import { queryClient } from '../queries/cache';
 import { workspaceStore } from '../data/workspace';
 import { CreateIssueRequest, IssueStatus, IssuePriority } from '../models/types';
-import { THEME, ColorScheme, SPACE, RADIUS, space, themeTokens } from '../lib/theme';
+import { ColorScheme, RADIUS, space, themeTokens } from '../lib/theme';
 import { detectSystemColorScheme } from '../lib/theme-manager';
 import { statusLabel, priorityLabel } from '../lib/issue-status';
 import { MulticaText } from '../components/ui/Text';
 import { Header } from '../components/ui/Header';
 import { IconButton } from '../components/ui/IconButton';
 import { MulticaButton } from '../components/ui/Button';
-import { StatusIcon } from '../components/ui/StatusIcon';
-import { PriorityIcon } from '../components/ui/PriorityIcon';
+
+const NEW_ISSUE_DEBUG_DOMAIN = 0xFF19;
+const NEW_ISSUE_DEBUG_TAG = 'NewIssuePage';
 
 @ComponentV2
 export struct NewIssuePage {
@@ -19,12 +21,26 @@ export struct NewIssuePage {
   @Local title: string = '';
   @Local description: string = '';
   @Local status: IssueStatus = 'todo';
-  @Local priority: IssuePriority = 'no_priority';
+  @Local priority: IssuePriority = 'none';
   @Local saving: boolean = false;
   @Local errorMessage: string = '';
 
+  // #region debug-point issue-create-crash
+  private debugInfo(stage: string, extra: string = ''): void {
+    hilog.info(NEW_ISSUE_DEBUG_DOMAIN, NEW_ISSUE_DEBUG_TAG,
+      `stage=${stage} titleLen=${this.title.length} issueStatus=${this.status} priority=${this.priority} ${extra}`);
+  }
+
+  private debugError(stage: string, err: Object | null = null): void {
+    const message = err instanceof Error ? err.message : `${err ?? 'unknown'}`;
+    hilog.error(NEW_ISSUE_DEBUG_DOMAIN, NEW_ISSUE_DEBUG_TAG,
+      `stage=${stage} error=${message}`);
+  }
+  // #endregion
+
   aboutToAppear(): void {
     this.scheme = this.detectScheme();
+    this.debugInfo('aboutToAppear');
   }
 
   private detectScheme(): ColorScheme {
@@ -32,8 +48,10 @@ export struct NewIssuePage {
   }
 
   private async submit(): Promise<void> {
+    this.debugInfo('submit:start', `descriptionLen=${this.description.length}`);
     if (this.title.trim().length === 0) {
       this.errorMessage = 'Title is required';
+      this.debugInfo('submit:blocked-empty-title');
       return;
     }
     this.saving = true;
@@ -45,32 +63,22 @@ export struct NewIssuePage {
         status: this.status,
         priority: this.priority
       };
+      this.debugInfo('submit:request-ready', `trimmedTitleLen=${req.title.length}`);
       const issue = await api.createIssue(req);
-      // Bug 8 fix: invalidate every issue-list query key so the
-      // newly-created issue shows up in MyIssuesPage / search /
-      // project lists. The cache module exposes a wildcard-free
-      // invalidate — we walk the registered keys for the current
-      // workspace and drop every key whose first segment is
-      // 'issues'. The next subscriber refetches from /api/issues
-      // and picks up the new row.
+      this.debugInfo('submit:created', `issueId=${issue.id}`);
       this.invalidateIssueLists();
+      this.debugInfo('submit:invalidate-done', `workspace=${workspaceStore.currentId ?? 'null'}`);
       appNavigation.pushName('IssueDetailPage', navParam('id', issue.id));
+      this.debugInfo('submit:navigate', `issueId=${issue.id}`);
     } catch (err) {
+      this.debugError('submit:catch', err as Object);
       this.errorMessage = err instanceof Error ? err.message : 'Failed to create issue';
     } finally {
       this.saving = false;
+      this.debugInfo('submit:finally', `error=${this.errorMessage || 'none'}`);
     }
   }
 
-  /**
-   * Invalidate every list-shaped issue cache for the current
-   * workspace. We can't use a single `queryClient.invalidate(['issues', wsId])`
-   * call because each list has a different params subkey; the
-   * concrete prefix is shared, so we drop all entries that start
-   * with that prefix. The cache is not enumerable from the
-   * outside, so the simplest fix is to delegate to a small
-   * `invalidatePrefix` helper on the cache.
-   */
   private invalidateIssueLists(): void {
     queryClient.invalidatePrefix(['issues', workspaceStore.currentId]);
   }
@@ -80,58 +88,41 @@ export struct NewIssuePage {
       Header({
         title: 'New issue',
         scheme: this.scheme,
-        left: this.CancelButton,
-        right: this.SubmitButton
+        left: this.CancelButton
       })
 
       Scroll() {
-        Column() {
-          MulticaText({
-            value: 'Title',
-            scheme: this.scheme,
-            textSize: 'sm',
-            weight: 'medium',
-            color: 'foreground'
-          })
-            .margin({ top: space('4') })
-
-          TextInput({ placeholder: 'What needs to be done?', text: this.title })
+        Column({ space: space('4') }) {
+          TextInput({ placeholder: 'Issue title', text: this.title })
             .placeholderColor(String(themeTokens(this.scheme).mutedForeground))
             .fontColor(String(themeTokens(this.scheme).foreground))
-            .backgroundColor(String(themeTokens(this.scheme).card))
-            .borderRadius(RADIUS.md)
-            .padding(space('3'))
+            .backgroundColor('transparent')
+            .fontSize(28)
+            .fontWeight(FontWeight.Medium)
+            .padding({ top: space('2'), bottom: space('2') })
             .width('100%')
-            .margin({ top: space('2') })
             .onChange((value: string) => {
               this.title = value;
               this.errorMessage = '';
             })
 
-          MulticaText({
-            value: 'Description',
-            scheme: this.scheme,
-            textSize: 'sm',
-            weight: 'medium',
-            color: 'foreground'
-          })
-            .margin({ top: space('4') })
-
-          TextArea({ placeholder: 'Add more context (optional)', text: this.description })
+          TextArea({ placeholder: 'Add description...', text: this.description })
             .placeholderColor(String(themeTokens(this.scheme).mutedForeground))
             .fontColor(String(themeTokens(this.scheme).foreground))
-            .backgroundColor(String(themeTokens(this.scheme).card))
-            .borderRadius(RADIUS.md)
-            .padding(space('3'))
+            .backgroundColor('transparent')
+            .fontSize(16)
+            .padding({ top: 0, bottom: 0 })
             .width('100%')
             .height(120)
-            .margin({ top: space('2') })
             .onChange((value: string) => {
               this.description = value;
             })
 
-          this.PickerRow('status', 'Status', statusLabel(this.status))
-          this.PickerRow('priority', 'Priority', priorityLabel(this.priority))
+          Column({ space: space('3') }) {
+            this.PickerRow('Status', statusLabel(this.status))
+            this.PickerRow('Priority', priorityLabel(this.priority))
+          }
+          .margin({ top: space('2') })
 
           if (this.errorMessage) {
             MulticaText({
@@ -140,26 +131,37 @@ export struct NewIssuePage {
               textSize: 'sm',
               color: 'destructive'
             })
-              .margin({ top: space('2') })
           }
+
+          MulticaButton({
+            label: this.saving ? 'Saving…' : 'Create',
+            scheme: this.scheme,
+            variant: 'primary',
+            fullWidth: true,
+            disabled: this.saving || this.title.trim().length === 0,
+            onTap: () => { void this.submit(); }
+          })
+            .margin({ top: space('2') })
         }
-        .padding(space('4'))
+        .padding({ left: space('4'), right: space('4'), top: space('4'), bottom: space('6') })
         .alignItems(HorizontalAlign.Start)
+        .width('100%')
       }
       .layoutWeight(1)
       .width('100%')
+      .scrollBar(BarState.Off)
     }
     .width('100%')
     .height('100%')
     .backgroundColor(String(themeTokens(this.scheme).background))
   }
 
-  @Builder PickerRow(kind: 'status' | 'priority', label: string, value: string) {
+  @Builder PickerRow(label: string, value: string) {
     Row() {
       MulticaText({
         value: label,
         scheme: this.scheme,
-        textSize: 'sm',
+        textSize: 'base',
         weight: 'medium',
         color: 'foreground'
       })
@@ -167,27 +169,22 @@ export struct NewIssuePage {
       MulticaText({
         value: value,
         scheme: this.scheme,
-        textSize: 'sm',
+        textSize: 'base',
         color: 'mutedForeground'
       })
       MulticaText({
         value: ' ›',
         scheme: this.scheme,
-        textSize: 'sm',
+        textSize: 'base',
         color: 'mutedForeground'
       })
     }
     .width('100%')
-    .padding({ left: space('3'), right: space('3'), top: space('3'), bottom: space('3') })
+    .padding({ left: space('4'), right: space('4'), top: space('4'), bottom: space('4') })
     .backgroundColor(String(themeTokens(this.scheme).card))
     .borderRadius(RADIUS.md)
-    .margin({ top: space('3') })
     .onClick(() => {
-      // Bug 10 fix: dispatch on the typed `kind` param, not the
-      // human-readable label. The label is a future i18n concern;
-      // a string compare would silently break under a non-English
-      // build. The `kind` union is compile-time fixed.
-      if (kind === 'status') {
+      if (label === 'Status') {
         this.cycleStatus();
       } else {
         this.cyclePriority();
@@ -204,17 +201,6 @@ export struct NewIssuePage {
     })
   }
 
-  @Builder SubmitButton() {
-    MulticaButton({
-      label: this.saving ? 'Saving…' : 'Create',
-      scheme: this.scheme,
-      variant: 'primary',
-      buttonSize: 'sm',
-      disabled: this.saving,
-      onTap: () => { void this.submit(); }
-    })
-  }
-
   private cycleStatus(): void {
     const order: IssueStatus[] = ['backlog', 'todo', 'in_progress', 'in_review', 'done', 'cancelled'];
     const idx = order.indexOf(this.status);
@@ -222,7 +208,7 @@ export struct NewIssuePage {
   }
 
   private cyclePriority(): void {
-    const order: IssuePriority[] = ['no_priority', 'low', 'medium', 'high', 'urgent'];
+    const order: IssuePriority[] = ['none', 'low', 'medium', 'high', 'urgent'];
     const idx = order.indexOf(this.priority);
     this.priority = order[(idx + 1) % order.length];
   }

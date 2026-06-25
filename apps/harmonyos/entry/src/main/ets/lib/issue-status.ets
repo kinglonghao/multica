@@ -28,7 +28,7 @@ export function statusLabel(status: IssueStatus | string | null | undefined): st
 export function priorityLabel(priority: IssuePriority | string | null | undefined): string {
   if (!priority) return 'No priority';
   switch (priority) {
-    case 'no_priority': return 'No priority';
+    case 'none': return 'No priority';
     case 'urgent': return 'Urgent';
     case 'high': return 'High';
     case 'medium': return 'Medium';
@@ -57,7 +57,7 @@ export function priorityColor(priority: IssuePriority | string | null | undefine
     case 'high': return String(t.priorityHigh);
     case 'medium': return String(t.priorityMedium);
     case 'low': return String(t.priorityLow);
-    case 'no_priority':
+    case 'none':
     default: return String(t.priorityNone);
   }
 }

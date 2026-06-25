@@ -1,3 +1,4 @@
+import hilog from '@ohos.hilog';
 import { workspaceStore } from '../data/workspace';
 import { api } from '../data/api';
 import { useQuery, QueryHandle, FetchContext, queryClient } from '../queries/cache';
@@ -7,6 +8,9 @@ import { detectSystemColorScheme } from '../lib/theme-manager';
 import { MulticaText } from '../components/ui/Text';
 import { Avatar } from '../components/ui/Avatar';
 import { Skeleton } from '../components/ui/Skeleton';
+
+const AGENTS_DEBUG_DOMAIN = 0xFF15;
+const AGENTS_DEBUG_TAG = 'AgentsPage';
 
 @ComponentV2
 export struct AgentsPage {
@@ -19,9 +23,23 @@ export struct AgentsPage {
   private query: QueryHandle<Agent[]> | null = null;
   private globalUnsub?: () => void;
 
+  // #region debug-point C:agents-page-entry
+  private debugInfo(stage: string, extra: string = ''): void {
+    hilog.info(AGENTS_DEBUG_DOMAIN, AGENTS_DEBUG_TAG,
+      `stage=${stage} workspaceId=${workspaceStore.currentId ?? 'null'} workspaceSlug=${workspaceStore.currentSlug ?? 'null'} ${extra}`);
+  }
+
+  private debugError(stage: string, err: Object | null = null): void {
+    const message = err instanceof Error ? err.message : `${err ?? 'unknown'}`;
+    hilog.error(AGENTS_DEBUG_DOMAIN, AGENTS_DEBUG_TAG,
+      `stage=${stage} error=${message}`);
+  }
+  // #endregion
+
   aboutToAppear(): void {
     this.scheme = this.detectScheme();
     const wsId = workspaceStore.currentId;
+    this.debugInfo('aboutToAppear', `queryWsId=${wsId ?? 'null'}`);
     this.query = useQuery<Agent[]>(
       ['agents', wsId],
       (ctx: FetchContext) => api.listAgents({ cancelToken: ctx.cancelToken }),
@@ -46,6 +64,11 @@ export struct AgentsPage {
     this._isLoading = s.isLoading;
     this._data = s.data as Agent[] | undefined;
     this._error = s.error;
+    const count = s.data ? s.data.length : -1;
+    this.debugInfo('syncFromCache', `loading=${s.isLoading} count=${count} error=${s.error ? s.error.message : 'none'}`);
+    if (s.error) {
+      this.debugError('syncFromCache:error', s.error as Object);
+    }
   }
 
   build() {
@@ -76,6 +99,19 @@ export struct AgentsPage {
           color: 'destructive'
         })
           .padding(space('4'))
+      } else if ((this._data?.length ?? 0) === 0) {
+        Column() {
+          MulticaText({
+            value: 'No agents yet',
+            scheme: this.scheme,
+            textSize: 'sm',
+            color: 'mutedForeground',
+            textAlign: 'center'
+          })
+            .padding(space('6'))
+        }
+        .layoutWeight(1)
+        .width('100%')
       } else {
         List({ space: 0 }) {
           ForEach(this._data ?? [], (agent: Agent) => {

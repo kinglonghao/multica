@@ -1,3 +1,4 @@
+import hilog from '@ohos.hilog';
 import { appNavigation, navParam } from '../data/navigation';
 import { authStore } from '../data/auth';
 import { workspaceStore } from '../data/workspace';
@@ -15,6 +16,9 @@ interface MenuItem {
   onPress: () => void;
 }
 
+const MORE_DEBUG_DOMAIN = 0xFF13;
+const MORE_DEBUG_TAG = 'MorePage';
+
 @ComponentV2
 export struct MorePage {
   @Local scheme: ColorScheme = 'light';
@@ -23,9 +27,17 @@ export struct MorePage {
   @Local workspaceName: string = '';
   @Local logoutError: string = '';
 
+  // #region debug-point A:more-page-entry
+  private debugInfo(stage: string, extra: string = ''): void {
+    hilog.info(MORE_DEBUG_DOMAIN, MORE_DEBUG_TAG,
+      `stage=${stage} workspaceId=${workspaceStore.currentId ?? 'null'} workspaceSlug=${workspaceStore.currentSlug ?? 'null'} ${extra}`);
+  }
+  // #endregion
+
   aboutToAppear(): void {
     this.scheme = this.detectScheme();
     this.refreshUser();
+    this.debugInfo('aboutToAppear', `workspaceName=${this.workspaceName || 'empty'}`);
   }
 
     private detectScheme(): ColorScheme {
@@ -53,13 +65,13 @@ export struct MorePage {
 
   private searchMenuItems(): MenuItem[] {
     return [
-      { label: 'Projects', hint: '查看项目', icon: '◫', onPress: () => appNavigation.pushName('SearchPage', navParam('tab', 'projects')) },
-      { label: 'Issues', hint: '浏览任务', icon: '☰', onPress: () => appNavigation.pushName('SearchPage', navParam('tab', 'issues')) },
-      { label: 'Pinned', hint: '固定内容', icon: '⌘', onPress: () => appNavigation.pushName('SearchPage', navParam('tab', 'pins')) },
-      { label: 'Agents', hint: '智能体', icon: '✦', onPress: () => appNavigation.pushName('AgentsPage') },
-      { label: 'Notifications', hint: '通知中心', icon: '◉', onPress: () => appNavigation.pushName('NotificationsPage') },
-      { label: 'Profile', hint: '个人资料', icon: '◌', onPress: () => appNavigation.pushName('ProfilePage') },
-      { label: 'Switch workspace', hint: '切换空间', icon: '⇄', onPress: () => appNavigation.pushName('SwitchWorkspacePage') }
+      { label: 'Projects', hint: '查看项目', icon: '◫', onPress: () => { this.debugInfo('tap-projects', 'target=ProjectsPage'); appNavigation.pushName('ProjectsPage'); } },
+      { label: 'Issues', hint: '浏览任务', icon: '☰', onPress: () => { this.debugInfo('tap-issues', 'target=IssuesPage'); appNavigation.pushName('IssuesPage'); } },
+      { label: 'Pinned', hint: '固定内容', icon: '⌘', onPress: () => { this.debugInfo('tap-pinned', 'target=SearchPage tab=pins'); appNavigation.pushName('SearchPage', navParam('tab', 'pins')); } },
+      { label: 'Agents', hint: '智能体', icon: '✦', onPress: () => { this.debugInfo('tap-agents', 'target=AgentsPage'); appNavigation.pushName('AgentsPage'); } },
+      { label: 'Notifications', hint: '通知中心', icon: '◉', onPress: () => { this.debugInfo('tap-notifications', 'target=NotificationsPage'); appNavigation.pushName('NotificationsPage'); } },
+      { label: 'Profile', hint: '个人资料', icon: '◌', onPress: () => { this.debugInfo('tap-profile', 'target=ProfilePage'); appNavigation.pushName('ProfilePage'); } },
+      { label: 'Switch workspace', hint: '切换空间', icon: '⇄', onPress: () => { this.debugInfo('tap-switch-workspace', 'target=SwitchWorkspacePage'); appNavigation.pushName('SwitchWorkspacePage'); } }
     ];
   }
 

@@ -126,13 +126,30 @@ export struct NotificationsPage {
         .padding({ left: space('3'), right: space('3'), top: space('3') })
         .width('100%')
       } else if (this._error) {
-        MulticaText({
-          value: `Failed to load notification preferences: ${this._error.message}`,
-          scheme: this.scheme,
-          textSize: 'sm',
-          color: 'destructive'
-        })
-          .padding(space('4'))
+        Column() {
+          MulticaText({
+            value: this._error.message.indexOf('404') >= 0 ? '当前环境暂不支持通知设置' : '加载通知设置失败',
+            scheme: this.scheme,
+            textSize: 'lg',
+            weight: 'semibold',
+            textAlign: 'center',
+            color: this._error.message.indexOf('404') >= 0 ? 'foreground' : 'destructive'
+          })
+          MulticaText({
+            value: this._error.message.indexOf('404') >= 0
+              ? '服务端尚未提供通知偏好接口，后续接通后这里会显示具体开关。'
+              : this._error.message,
+            scheme: this.scheme,
+            textSize: 'sm',
+            color: 'mutedForeground',
+            textAlign: 'center'
+          })
+            .margin({ top: space('2') })
+        }
+        .layoutWeight(1)
+        .width('100%')
+        .padding(space('6'))
+        .justifyContent(FlexAlign.Center)
       } else {
         List({ space: 0 }) {
           ForEach(this.prefs, (pref: NotificationPreference, index?: number) => {
