@@ -124,6 +124,10 @@ class AuthStore {
     this.set({ state: 'unauthed', user: null, token: null, error: null });
   }
 
+  setUser(user: User | null): void {
+    this.set({ user });
+  }
+
   /**
    * Idempotent: if multiple requests 401 simultaneously (e.g. session
    * just expired server-side), only the first one runs the clear+navigate

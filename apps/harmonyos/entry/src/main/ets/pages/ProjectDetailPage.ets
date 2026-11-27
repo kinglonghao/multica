@@ -123,17 +123,17 @@ export struct ProjectDetailPage {
         Column() {
           Stack({ alignContent: Alignment.Center }) {
             MulticaText({
-              value: this._project!.identifier,
+              value: '📁',
               scheme: this.scheme,
-              textSize: 'lg',
-              weight: 'bold',
-              color: 'brandForeground'
+              textSize: 'xl',
+              weight: 'medium'
             })
           }
           .width(56)
           .height(56)
           .borderRadius(RADIUS.lg)
-          .backgroundColor(String(themeTokens(this.scheme).brand))
+          .backgroundColor(String(themeTokens(this.scheme).card))
+          .border({ width: 1, color: String(themeTokens(this.scheme).border) })
 
           MulticaText({
             value: this._project!.name,

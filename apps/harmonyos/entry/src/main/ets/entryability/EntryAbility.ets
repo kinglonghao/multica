@@ -48,13 +48,17 @@ export default class EntryAbility extends UIAbility {
       hilog.info(DOMAIN, TAG, '%{public}s', 'Index page loaded.');
     });
 
-    // Edge-to-edge: let content paint behind the status bar. Matches the
-    // iOS client's "Lock the look" — we want a single, immersive canvas
-    // and rely on safe-area insets inside the page chrome to avoid the
-    // status bar and navigation gesture areas.
+    // Keep edge-to-edge layout, but control system bar colors explicitly.
+    // Normal window layout introduced a larger white top bar on HarmonyOS.
     try {
       const win = windowStage.getMainWindowSync();
       win.setWindowLayoutFullScreen(true);
+      win.setWindowSystemBarProperties({
+        statusBarColor: '#0B0B0C',
+        navigationBarColor: '#0B0B0C',
+        statusBarContentColor: '#E5E7EB',
+        navigationBarContentColor: '#E5E7EB'
+      });
     } catch (err) {
       hilog.warn(DOMAIN, TAG, 'setWindowLayoutFullScreen failed: %{public}s', JSON.stringify(err));
     }

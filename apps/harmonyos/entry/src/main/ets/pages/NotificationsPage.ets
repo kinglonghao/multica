@@ -1,4 +1,3 @@
-import { appNavigation } from '../data/navigation';
 import { api } from '../data/api';
 import { useQuery, QueryHandle, FetchContext, queryClient } from '../queries/cache';
 import { NotificationPreferences, NotificationPreference } from '../models/types';
@@ -6,28 +5,32 @@ import { ColorScheme, RADIUS, space, themeTokens } from '../lib/theme';
 import { detectSystemColorScheme } from '../lib/theme-manager';
 import { MulticaText } from '../components/ui/Text';
 import { Skeleton } from '../components/ui/Skeleton';
-import { MulticaButton } from '../components/ui/Button';
 
 const PREFS_QUERY_KEY: readonly string[] = ['notification-prefs', 'self'];
 const PREFS_STALE_MS = 60_000;
 
+class GroupMeta {
+  label: string = '';
+  description: string = '';
+}
+
+const GROUP_META: Map<string, GroupMeta> = new Map<string, GroupMeta>([
+  ['assignments', (() => { const meta = new GroupMeta(); meta.label = 'Assignments'; meta.description = "When you're assigned an issue or removed as assignee."; return meta; })()],
+  ['status_changes', (() => { const meta = new GroupMeta(); meta.label = 'Status changes'; meta.description = "When an issue's status changes."; return meta; })()],
+  ['comments', (() => { const meta = new GroupMeta(); meta.label = 'Comments'; meta.description = "New comments on issues you're subscribed to."; return meta; })()],
+  ['updates', (() => { const meta = new GroupMeta(); meta.label = 'Issue updates'; meta.description = 'Edits to title, description, labels, priority, or due date.'; return meta; })()],
+  ['agent_activity', (() => { const meta = new GroupMeta(); meta.label = 'Agent activity'; meta.description = 'When an agent picks up, runs, or completes a task.'; return meta; })()],
+  ['system_notifications', (() => { const meta = new GroupMeta(); meta.label = 'System notifications'; meta.description = 'Account changes, security alerts, product updates.'; return meta; })()]
+]);
+
 @ComponentV2
 export struct NotificationsPage {
   @Local scheme: ColorScheme = 'light';
-  @Local saving: boolean = false;
   @Local errorMessage: string = '';
-  @Local success: boolean = false;
   @Local version: number = 0;
-  // H-1 fix: @Local mirrors. See InboxPage.ets.
   @Local _isLoading: boolean = true;
   @Local _data: NotificationPreferences | undefined = undefined;
   @Local _error: Error | null = null;
-  /** Immutable snapshot of the prefs list. Each toggle creates a new
-   *  array via `setPref(prefs, index, next)` rather than mutating
-   *  in place — fixes H-3 (the v0.2 code did `pref.enabled = isOn`
-   *  directly, which both breaks the immutability rule AND doesn't
-   *  fire the page's onUpdate because the cache object identity is
-   *  preserved). */
   @Local prefs: NotificationPreference[] = [];
   private query: QueryHandle<NotificationPreferences> | null = null;
   private globalUnsub?: () => void;
@@ -63,15 +66,10 @@ export struct NotificationsPage {
     if (s.data) this.prefs = [...s.data.preferences];
   }
 
-    private detectScheme(): ColorScheme {
+  private detectScheme(): ColorScheme {
     return detectSystemColorScheme();
   }
 
-  /** Toggle handler — produces a NEW prefs array (immutable), and
-   *  also patches the cache so subsequent reads (e.g. on save)
-   *  see the toggle applied. This is the React-style "lift state up"
-   *  pattern adapted to V2: cache holds the truth, local @Local
-   *  holds the snapshot that the page renders. */
   private togglePref(index: number, next: boolean): void {
     const before = this.prefs;
     const after = before.map((p, i): NotificationPreference => {
@@ -84,33 +82,14 @@ export struct NotificationsPage {
     }
   }
 
-  private async save(): Promise<void> {
-    const data = this.query?.getState().data;
-    if (!data) return;
-    this.saving = true;
-    this.errorMessage = '';
-    this.success = false;
-    try {
-      // Send the locally-edited prefs back, NOT a fresh GET.
-      const updated: NotificationPreferences = { workspace_id: data.workspace_id, preferences: this.prefs };
-      const saved = await api.updateNotificationPreferences(updated);
-      this.success = true;
-      if (this.query?.getState().data) {
-        this.query.getState().data!.preferences = saved.preferences;
-      }
-      this.prefs = [...saved.preferences];
-    } catch (err) {
-      // H-7: surface save errors to the user. The earlier v0.2 code
-      // silently logged `[notifications] save failed` and let the user
-      // think the change had been saved.
-      this.errorMessage = err instanceof Error ? err.message : 'Failed to save notification preferences';
-    } finally {
-      this.saving = false;
-    }
+  private labelForCategory(category: string): string {
+    const meta = GROUP_META.get(category);
+    return meta ? meta.label : category;
   }
 
-  private queryState() {
-    return this.query ? this.query.getState() : null;
+  private descriptionForCategory(category: string): string {
+    const meta = GROUP_META.get(category);
+    return meta ? meta.description : 'Notification setting';
   }
 
   build() {
@@ -128,7 +107,7 @@ export struct NotificationsPage {
       } else if (this._error) {
         Column() {
           MulticaText({
-            value: this._error.message.indexOf('404') >= 0 ? '当前环境暂不支持通知设置' : '加载通知设置失败',
+            value: this._error.message.indexOf('404') >= 0 ? 'Notification settings are not available in this environment.' : 'Failed to load notification preferences.',
             scheme: this.scheme,
             textSize: 'lg',
             weight: 'semibold',
@@ -137,7 +116,7 @@ export struct NotificationsPage {
           })
           MulticaText({
             value: this._error.message.indexOf('404') >= 0
-              ? '服务端尚未提供通知偏好接口，后续接通后这里会显示具体开关。'
+              ? 'The backend has not exposed notification preferences yet.'
               : this._error.message,
             scheme: this.scheme,
             textSize: 'sm',
@@ -151,47 +130,58 @@ export struct NotificationsPage {
         .padding(space('6'))
         .justifyContent(FlexAlign.Center)
       } else {
-        List({ space: 0 }) {
-          ForEach(this.prefs, (pref: NotificationPreference, index?: number) => {
-            ListItem() {
-              Row() {
-                Column() {
-                  MulticaText({
-                    value: pref.category,
-                    scheme: this.scheme,
-                    textSize: 'sm',
-                    weight: 'medium',
-                    color: 'foreground'
-                  })
-                  MulticaText({
-                    value: pref.channel,
-                    scheme: this.scheme,
-                    textSize: 'xs',
-                    color: 'mutedForeground'
-                  })
-                    .margin({ top: 2 })
-                }
-                .layoutWeight(1)
-                .alignItems(HorizontalAlign.Start)
+        Scroll() {
+          Column() {
+            this.SectionHeader('Inbox notifications', 'Which events show up in your inbox.')
+            Column() {
+              ForEach(this.prefs, (pref: NotificationPreference, index?: number) => {
+                Row() {
+                  Column() {
+                    MulticaText({
+                      value: this.labelForCategory(pref.category),
+                      scheme: this.scheme,
+                      textSize: 'sm',
+                      weight: 'medium',
+                      color: 'foreground'
+                    })
+                    MulticaText({
+                      value: this.descriptionForCategory(pref.category),
+                      scheme: this.scheme,
+                      textSize: 'xs',
+                      color: 'mutedForeground'
+                    })
+                      .margin({ top: 2 })
+                  }
+                  .layoutWeight(1)
+                  .alignItems(HorizontalAlign.Start)
 
-                Toggle({ type: ToggleType.Switch, isOn: pref.enabled })
-                  .onChange((isOn: boolean) => {
-                    this.togglePref(index ?? 0, isOn);
-                  })
-              }
-              .width('100%')
-              .padding({ left: space('3'), right: space('3'), top: space('3'), bottom: space('3') })
-              .onClick(() => {
-                this.togglePref(index ?? 0, !pref.enabled);
+                  Toggle({ type: ToggleType.Switch, isOn: pref.enabled })
+                    .onChange((isOn: boolean) => {
+                      this.togglePref(index ?? 0, isOn);
+                    })
+                }
+                .width('100%')
+                .padding({ left: space('4'), right: space('4'), top: space('3'), bottom: space('3') })
+                .border((index ?? 0) < this.prefs.length - 1 ? {
+                  width: { bottom: 1 },
+                  color: String(themeTokens(this.scheme).border)
+                } : undefined)
+                .onClick(() => {
+                  this.togglePref(index ?? 0, !pref.enabled);
+                })
               })
             }
-          })
+            .width('100%')
+            .backgroundColor(String(themeTokens(this.scheme).card))
+            .borderRadius(RADIUS.xl)
+            .border({ width: 1, color: String(themeTokens(this.scheme).border) })
+          }
+          .width('100%')
+          .padding({ left: space('3'), right: space('3'), top: space('3'), bottom: space('3') })
+          .alignItems(HorizontalAlign.Start)
         }
         .layoutWeight(1)
         .width('100%')
-        .padding({ left: space('3'), right: space('3'), top: space('3') })
-        .divider(null)
-        .backgroundColor(String(themeTokens(this.scheme).background))
       }
 
       if (this.errorMessage) {
@@ -204,37 +194,30 @@ export struct NotificationsPage {
           .width('100%')
           .padding({ left: space('3'), right: space('3'), top: space('2') })
       }
-
-      if (this.success) {
-        MulticaText({
-          value: 'Saved',
-          scheme: this.scheme,
-          textSize: 'xs',
-          color: 'success'
-        })
-          .width('100%')
-          .padding({ left: space('3'), right: space('3'), top: space('2') })
-      }
-
-      Row() {
-        MulticaButton({
-          label: this.saving ? 'Saving...' : 'Save',
-          scheme: this.scheme,
-          variant: 'primary',
-          fullWidth: true,
-          disabled: this.saving,
-          onTap: () => { void this.save(); }
-        })
-      }
-      .width('100%')
-      .padding({ left: space('3'), right: space('3'), top: space('2'), bottom: space('3') })
-      .border({
-        width: { top: 1 },
-        color: String(themeTokens(this.scheme).border)
-      })
     }
     .width('100%')
     .height('100%')
     .backgroundColor(String(themeTokens(this.scheme).background))
+  }
+
+  @Builder SectionHeader(title: string, description: string) {
+    Column() {
+      MulticaText({
+        value: title,
+        scheme: this.scheme,
+        textSize: 'xs',
+        color: 'mutedForeground',
+        weight: 'semibold'
+      })
+      MulticaText({
+        value: description,
+        scheme: this.scheme,
+        textSize: 'xs',
+        color: 'mutedForeground'
+      })
+        .margin({ top: 4 })
+    }
+    .margin({ left: space('1'), bottom: space('2') })
+    .alignItems(HorizontalAlign.Start)
   }
 }

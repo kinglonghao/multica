@@ -30,15 +30,10 @@ export struct Header {
     .padding({
       left: space('4'),
       right: space('4'),
-      top: space('6'),
+      top: 54,
       bottom: space('3')
     })
-    .backgroundColor(String(themeTokens(this.scheme).background))
-    .border({
-      width: { bottom: 1 },
-      color: String(themeTokens(this.scheme).border)
-    })
-    .constraintSize({ minHeight: 56 })
+    .constraintSize({ minHeight: 88 })
     .alignItems(VerticalAlign.Center)
   }
 }

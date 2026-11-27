@@ -1,32 +1,37 @@
 /**
  * Theme manager for HarmonyOS application.
- * Provides system theme detection and theme change listeners.
+ * Provides persisted preference-aware theme detection.
  */
 
+import { Preferences } from '../data/preferences';
 import { ColorScheme } from './theme';
 
-/**
- * Get the current system color scheme
- * @returns 'light' or 'dark' based on system configuration
- * 
- * TODO: Implement proper system theme detection using HarmonyOS APIs
- * For HarmonyOS, we should use:
- * - @ohos.system.SystemSettings.getColorMode() to get system color mode
- * - Or implement theme change listeners
- * 
- * Currently returns 'light' as a placeholder.
- * In a production app, this should detect the actual system theme.
- */
-export function getSystemColorScheme(): ColorScheme {
-  // TODO: Implement proper system theme detection
-  // For now, return 'light' as default
-  return 'light';
+export type ThemePreference = 'light' | 'dark' | 'system';
+
+export function onThemePreferenceChanged(listener: () => void): () => void {
+  return Preferences.subscribe(() => {
+    listener();
+  });
+}
+
+export function getThemePreference(): ThemePreference {
+  const pref = Preferences.getThemePref();
+  return pref === 'light' || pref === 'dark' || pref === 'system' ? pref : 'system';
 }
 
 /**
- * Simple theme detection function for use in page components
- * This can be called from any page's detectScheme method
+ * Get the current app color scheme.
+ *
+ * HarmonyOS system-theme API wiring is still pending, so `system`
+ * currently falls back to light mode. Explicit user choices must still
+ * win so Settings -> Appearance behaves the same as iOS.
  */
+export function getSystemColorScheme(): ColorScheme {
+  return 'light';
+}
+
 export function detectSystemColorScheme(): ColorScheme {
+  const pref = getThemePreference();
+  if (pref === 'light' || pref === 'dark') return pref;
   return getSystemColorScheme();
 }

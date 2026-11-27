@@ -90,7 +90,7 @@ import {
  *     cache's CancelToken flips to aborted (or on the 30s timeout).
  */
 
-const API_URL = 'https://api.multica.ai'; // Overridden in setBaseUrl() — see app init.
+const API_URL = 'http://multica.zliao.cc'; // Overridden in setBaseUrl() — see app init.
 
 let BASE_URL = API_URL;
 
@@ -150,7 +150,7 @@ interface PinRequest {
   item_type: 'issue' | 'project' | 'doc';
 }
 
-interface UploadFileAsset {
+export interface UploadFileAsset {
   uri: string;
   name: string;
   type: string;
@@ -283,6 +283,11 @@ class ApiClient {
       const duration = Date.now() - start;
       const logFn = status >= 500 ? console.error : status === 404 ? console.warn : console.info;
       logFn(`[api] ← ${status} ${path} rid=${id} dur=${duration}ms`);
+      // #region debug-point D:http-non-2xx
+      if (status < 200 || status >= 300) {
+        console.error(`[api] !! ${status} ${path} rid=${id} base=${BASE_URL} ws=${slug ?? '-'} body=${rawBody}`);
+      }
+      // #endregion
 
       if (status === 401) {
         this.options.onUnauthorized?.();

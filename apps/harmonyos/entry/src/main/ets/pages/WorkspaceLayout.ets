@@ -4,7 +4,7 @@ import { globalEvents } from '../data/auth';
 import { workspaceStore } from '../data/workspace';
 import { wsClient } from '../realtime/ws-client';
 import { ColorScheme, RADIUS, TextColorKey, space, themeTokens } from '../lib/theme';
-import { detectSystemColorScheme } from '../lib/theme-manager';
+import { detectSystemColorScheme, onThemePreferenceChanged } from '../lib/theme-manager';
 import { MulticaText } from '../components/ui/Text';
 import { Skeleton } from '../components/ui/Skeleton';
 import { InboxPage } from './InboxPage';
@@ -27,6 +27,7 @@ export struct WorkspaceLayout {
   private authUnsub?: () => void;
   private wsUnsub?: () => void;
   private authStateUnsub?: () => void;
+  private themeUnsub?: () => void;
   private bootStarted: boolean = false;
 
   aboutToAppear(): void {
@@ -45,6 +46,9 @@ export struct WorkspaceLayout {
         void this.bootstrap();
       }
     });
+    this.themeUnsub = onThemePreferenceChanged(() => {
+      this.scheme = this.detectScheme();
+    });
     if (authStore.getState().state !== 'authed') {
       appNavigation.pushName('LoginPage');
       this.bootstrapping = false;
@@ -59,6 +63,7 @@ export struct WorkspaceLayout {
     this.authUnsub?.();
     this.wsUnsub?.();
     this.authStateUnsub?.();
+    this.themeUnsub?.();
     wsClient.disconnect();
   }
 

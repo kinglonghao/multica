@@ -14,17 +14,17 @@ export struct ProjectRow {
     Row() {
       Stack({ alignContent: Alignment.Center }) {
         MulticaText({
-          value: this.project.identifier,
+          value: '📁',
           scheme: this.scheme,
-          textSize: 'xs',
-          weight: 'bold',
-          color: 'brandForeground'
+          textSize: 'lg',
+          weight: 'medium'
         })
       }
-      .width(36)
-      .height(36)
-      .borderRadius(RADIUS.md)
-      .backgroundColor(String(themeTokens(this.scheme).brand))
+      .width(40)
+      .height(40)
+      .borderRadius(12)
+      .backgroundColor(String(themeTokens(this.scheme).card))
+      .border({ width: 1, color: String(themeTokens(this.scheme).border) })
       .margin({ right: space('3') })
 
       Column() {

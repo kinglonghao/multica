@@ -56,15 +56,28 @@ struct Index {
   }
 
   build() {
-    Navigation(appNavigation.stack) {
-      // Always WorkspaceLayout. The shell handles its own splash
-      // (via its own `bootstrapping` flag) AND its own auth check
-      // (via the aboutToAppear in WorkspaceLayout.ets). Index is
-      // a thin shell around the navigation root.
-      WorkspaceLayout()
+    Stack() {
+      Column()
+        .width('100%')
+        .height('100%')
+        .backgroundColor('#0B0B0C')
+
+      Navigation(appNavigation.stack) {
+        // Always WorkspaceLayout. The shell handles its own splash
+        // (via its own `bootstrapping` flag) AND its own auth check
+        // (via the aboutToAppear in WorkspaceLayout.ets). Index is
+        // a thin shell around the navigation root.
+        WorkspaceLayout()
+      }
+      .mode(NavigationMode.Stack)
+      .hideTitleBar(true)
+      .navDestination(PageDestinations)
+      .width('100%')
+      .height('100%')
+      .backgroundColor('#0B0B0C')
     }
-    .mode(NavigationMode.Stack)
-    .hideTitleBar(true)
-    .navDestination(PageDestinations)
+    .width('100%')
+    .height('100%')
+    .backgroundColor('#0B0B0C')
   }
 }

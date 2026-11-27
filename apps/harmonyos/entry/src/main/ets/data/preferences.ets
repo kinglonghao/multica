@@ -130,15 +130,21 @@ class PreferencesImpl {
     }
   }
 
-  subscribe(listener: (s: PreferencesSnapshot) => void): () => void {
-    this.listeners.add(listener);
-    return () => this.listeners.delete(listener);
+  getThemePref(): 'light' | 'dark' | 'system' {
+    return this.snapshot.themePref;
   }
 
   private emit(): void {
     for (const l of this.listeners) {
       l(this.snapshot);
     }
+  }
+
+  subscribe(listener: (s: PreferencesSnapshot) => void): () => void {
+    this.listeners.add(listener);
+    return () => {
+      this.listeners.delete(listener);
+    };
   }
 
   async setAuth(token: string, user: StoredUser): Promise<void> {

@@ -15,6 +15,7 @@ import realtimeHooksTest from './realtime-hooks.test';
 import pinMutationsTest from './pin-mutations.test';
 import parseResponseTest from './parse-response.test';
 import realtimeContractTest from './realtime-contract.test';
+import settingsParityTest from './settings-parity.test';
 
 export default function testsuite(): void {
   inboxDisplayTest();
@@ -28,4 +29,5 @@ export default function testsuite(): void {
   pinMutationsTest();
   parseResponseTest();
   realtimeContractTest();
+  settingsParityTest();
 }
